@@ -1,0 +1,52 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "build",
+			"dependsOn": [
+				"wasm-bindgen"
+			],
+			"problemMatcher": [],
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			}
+		},
+		{	
+			"type": "cargo",
+			"command": "build",
+			"args": [
+				"--release",
+				"--target",
+				"wasm32-unknown-unknown"
+			],
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": "build",
+			"label": "rust: cargo build",
+			"options": {
+				"cwd": "${workspaceFolder}/maxwell"
+
+			}
+		},
+		{
+			"type": "shell",
+			"label": "wasm-bindgen",
+			"command": "wasm-bindgen",
+			"dependsOn": [
+				"rust: cargo build"
+			],
+			"args": [
+				"--target",
+				"web",
+				"--out-dir",
+				"./out",
+				"./target/wasm32-unknown-unknown/release/maxwell.wasm"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}/maxwell"
+			}
+		}
+	]
+}
