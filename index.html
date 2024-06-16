@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vector Field Visualization</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f0f0f0;
+        }
+        canvas {
+            border: 1px solid #ccc;
+            margin-top: 20px;
+        }
+        .controls {
+            margin-top: 20px;
+        }
+        select, button {
+            padding: 10px;
+            margin: 0 10px;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+        }
+        .charge-properties {
+            display: none; // hide charge properties by default
+        }
+    </style>
+</head>
+<body>
+    <h1>Vector Field Visualization</h1>
+    <div class="controls">
+        <label for="plotType">Plot Type:</label>
+        <select id="plotType">
+            <option value="quiver">Quiver</option>
+            <option value="streamline">Streamline</option>
+        </select>
+        <label for="solver">Solver:</label>
+        <select id="solver">
+            <option value="electrostatic_direct">Electrostatic Direct</option>
+            <option value="electrostatic_fourier" selected>Electrostatic Fourier</option>
+        </select>
+
+        <button id="addPositiveCharge">Add Positive Charge</button>
+        <button id="addNegativeCharge">Add Negative Charge</button>
+    </div>
+    <div class="charge-properties">
+        <label for="charge">Charge:</label>
+        <input type="range" id="charge" min="-10" max="10" step="1" value="${charge.charge}">
+        <button id="deleteCharge">Delete Charge</button>
+    </div>
+    <canvas id="vectorFieldCanvas" width="800" height="600"></canvas>
+
+    <script src="./ui.js" type="module"></script>
+
+        
+
+</body>
+</html>
