@@ -152,7 +152,7 @@ impl FieldConfiguration {
     pub fn make_cic_grid(&mut self) {
         self.cic_grid = Some(Array2::<Complex<f64>>::zeros((self.nx, self.ny)));
         let cell_area = self.x_max * self.y_max / (self.nx * self.ny) as f64;
-        let charge_normalization = 400000.0 / cell_area;
+        let charge_normalization = 4000.0 / cell_area;
         if let Some(ref mut grid) = self.cic_grid {
             for charge in &self.charges {
                 if(charge.x<0.0 || charge.x>self.x_max || charge.y<0.0 || charge.y>self.y_max) {

@@ -205,17 +205,22 @@ export async function main() {
         const pageOffsetLeft = window.pageXOffset || document.documentElement.scrollLeft || document.body.scrollLeft || 0;
         const canvasRectTop = canvasRect.top + pageOffsetTop;
         const canvasRectLeft = canvasRect.left + pageOffsetLeft;
-        chargeProperties.style.top = `${canvasRectTop + charge.y }px`;
+        chargeProperties.style.top = `${canvasRectTop + charge.y - chargeProperties.offsetHeight / 2}px`;
 
         // Check if charge is on the right side of the screen
         if (charge.x > rect.width / 2) {
-            chargeProperties.style.left = `${canvasRectLeft + charge.x - chargeProperties.offsetWidth}px`;
+            chargeProperties.style.left = `${canvasRectLeft + charge.x - chargeProperties.offsetWidth - 20}px`;
+            chargeProperties.classList.add('point-right');
+            chargeProperties.classList.remove('point-left');
         } else {
-            chargeProperties.style.left = `${canvasRectLeft + charge.x}px`;
+            chargeProperties.style.left = `${canvasRectLeft + charge.x + 20}px`;
+            chargeProperties.classList.add('point-left');
+            chargeProperties.classList.remove('point-right');
+            
         }
         chargeProperties.style.zIndex = '1';
 
-
+        
     }
 
     function deselectCharge() {
@@ -240,15 +245,19 @@ export async function main() {
             ctx.arc(charge.x, charge.y, chargeSize, 0, 2 * Math.PI, false);
             ctx.fillStyle = charge.charge > 0 ? 'red' : 'blue';
             ctx.fill();
-            if (charge === selectedCharge) {
-                ctx.strokeStyle = 'black';
-                ctx.lineWidth = 2;
-            } else {
-                ctx.strokeStyle = 'grey';
-                ctx.lineWidth = 1;
-            }
+            changeLineStyleIfSelected(charge);
             ctx.stroke();
         });
+    }
+
+    function changeLineStyleIfSelected(charge) {
+        if (charge === selectedCharge) {
+            ctx.strokeStyle = 'black';
+            ctx.lineWidth = 2;
+        } else {
+            ctx.strokeStyle = 'grey';
+            ctx.lineWidth = 1;
+        }
     }
 
     function drawCurrents() {
@@ -260,6 +269,7 @@ export async function main() {
             ctx.arc(charge.x, charge.y, chargeSize, 0, 2 * Math.PI, false);
             ctx.fillStyle = 'white';
             ctx.fill();
+            changeLineStyleIfSelected(charge);
             ctx.stroke();
             ctx.beginPath();
             if (charge.charge>0) {
@@ -282,8 +292,8 @@ export async function main() {
 
     function addCharge(x, y, charge) {
         charges.push({x, y, charge});
+        deselectCharge();
         drawVectorField();
-        selectCharge(charges[charges.length - 1]);
     }
 
     function outputNumpyArray() {

@@ -30,10 +30,46 @@
         }
         div.charge-properties {
             display: none;
-            background-color: rgba(255, 255, 255, 0.8);
-            border-color: grey;
-            border-radius: 5px;
+            background-color: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(2px);
+            -webkit-backdrop-filter: blur(2px);
+            border-color: darkgrey;
+            border-width: 2px;
+            border-radius: 9px;
+            border-style: solid;
             padding: 10px;
+        }
+
+        div.point-right::after {
+            content: "";
+            position: absolute;
+            top: 50%;
+            right: -10px;
+            transform: translateY(-50%);
+            width: 0;
+            height: 0;
+            border-top: 10px solid transparent;
+            border-bottom: 10px solid transparent;
+            border-left: 10px solid darkgrey;
+        }
+
+        div.point-left::after {
+                content: "";
+                position: absolute;
+                top: 50%;
+                left: -10px;
+                transform: translateY(-50%);
+                width: 0;
+                height: 0;
+                border-top: 10px solid transparent;
+                border-bottom: 10px solid transparent;
+                border-right: 10px solid darkgrey;
+            }
+
+        
+
+        div.charge-properties {
+            font-size: 0.8em;
         }
 
     </style>

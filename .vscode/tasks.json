@@ -14,14 +14,17 @@
 		},
 		{	
 			"type": "cargo",
-			"command": "build",
+			"command": "cargo",
 			"args": [
+				"build",
 				"--release",
 				"--target",
 				"wasm32-unknown-unknown"
 			],
-			"problemMatcher": [
-				"$rustc"
+			"problemMatcher": [ {
+				"base": "$rustc",
+				"fileLocation": ["relative", "${workspaceFolder}/maxwell"]
+			}
 			],
 			"group": "build",
 			"label": "rust: cargo build",
