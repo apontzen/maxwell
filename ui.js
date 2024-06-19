@@ -1,4 +1,5 @@
-import init, { compute_field_electrostatic_direct, compute_field_electrostatic_fourier, init_panic_hook, FieldConfiguration } from './maxwell/out/maxwell.js';
+import init, { compute_field_electrostatic_direct, compute_field_magnetostatic_direct, 
+    compute_field_electrostatic_fourier, init_panic_hook, FieldConfiguration } from './maxwell/out/maxwell.js';
 
 export async function main() {
     await init();
@@ -20,7 +21,7 @@ export async function main() {
     let draggingOffsetX = 0;
     let draggingOffsetY = 0;
 
-    let cic_resolution = 20;
+    let cic_resolution = 600;
 
     const dpr = window.devicePixelRatio || 1;
 
@@ -41,17 +42,24 @@ export async function main() {
     canvas.style.height = `${rect.height}px`;
 
     let computeField = compute_field_electrostatic_direct;
+    let field = null;
     
     function updateSolverType() {
         // get value of solver
         const solverType = document.getElementById('solver').value;
         if (solverType === 'electrostatic_direct') {
+            updateChargeOrCurrentLabel('Charge');
             computeField = compute_field_electrostatic_direct;
         } else if (solverType === 'electrostatic_fourier') {
+            updateChargeOrCurrentLabel('Charge');
             computeField = compute_field_electrostatic_fourier;
+        } else if (solverType === 'magnetostatic_direct') { 
+            updateChargeOrCurrentLabel('Current');
+            computeField = compute_field_magnetostatic_direct;
         } else {
             console.error('Unknown solver type');
         }
+        field = new FieldConfiguration(rect.width, rect.height, cic_resolution, cic_resolution);
     }
 
     updateSolverType();
@@ -73,17 +81,25 @@ export async function main() {
             drawStreamlinePlot();
         }
 
-        drawCharges();
+        drawChargesOrCurrents();
+        // outputNumpyArray();
+    }
+
+    function updateChargeOrCurrentLabel(charge_or_current) {
+        // find all spans with class charge_or_current and update their contents to the provided string
+        const chargeOrCurrentSpans = document.querySelectorAll(`.charge_or_current`);
+        chargeOrCurrentSpans.forEach(span => {
+            span.textContent = charge_or_current;
+        });
     }
 
     function generateVectors() {
         const vectors = [];
         const step = 20;
-        const field = new FieldConfiguration(canvas.width, canvas.height, cic_resolution, cic_resolution);
         field.set_charges(charges);
 
-        for (let x = 0; x < canvas.width; x += step) {
-            for (let y = 0; y < canvas.height; y += step) {
+        for (let x = 0; x < rect.width; x += step) {
+            for (let y = 0; y < rect.height; y += step) {
                 // exclude the vector if it's within step distance from any charge
                 if (charges.some(charge => {
                     const dx = x - charge.x;
@@ -114,7 +130,7 @@ export async function main() {
             ctx.beginPath();
             ctx.moveTo(x, y);
             for (let j = 0; j < maxLength; j++) {
-                const {u, v} = computeField(x, y);
+                const {u, v} = computeField(field, x, y);
                 const speed = Math.sqrt(u * u + v * v);
                 if (speed < 0.1) break;
                 x += (u / speed) * stepSize;
@@ -138,6 +154,9 @@ export async function main() {
 
         x-=u/2;
         y-=v/2;
+
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = 'black';
 
         ctx.beginPath();
         ctx.moveTo(x, y);
@@ -174,32 +193,132 @@ export async function main() {
         chargeInput.value = charge.charge;
         selectedCharge = charge;
 
+        drawVectorField();
+
         const chargeProperties = document.querySelector('.charge-properties');
         chargeProperties.style.display = 'block';
+
+        chargeProperties.style.display = 'block';
+        chargeProperties.style.position = 'absolute';
+        const canvasRect = canvas.getBoundingClientRect();
+        const pageOffsetTop = window.pageYOffset || document.documentElement.scrollTop || document.body.scrollTop || 0;
+        const pageOffsetLeft = window.pageXOffset || document.documentElement.scrollLeft || document.body.scrollLeft || 0;
+        const canvasRectTop = canvasRect.top + pageOffsetTop;
+        const canvasRectLeft = canvasRect.left + pageOffsetLeft;
+        chargeProperties.style.top = `${canvasRectTop + charge.y }px`;
+
+        // Check if charge is on the right side of the screen
+        if (charge.x > rect.width / 2) {
+            chargeProperties.style.left = `${canvasRectLeft + charge.x - chargeProperties.offsetWidth}px`;
+        } else {
+            chargeProperties.style.left = `${canvasRectLeft + charge.x}px`;
+        }
+        chargeProperties.style.zIndex = '1';
+
+
     }
 
     function deselectCharge() {
         const chargeProperties = document.querySelector('.charge-properties');
         chargeProperties.style.display = 'none';
         selectedCharge = null;
+        drawVectorField();
+    }
+
+    function drawChargesOrCurrents() {
+        if (computeField === compute_field_magnetostatic_direct) {
+            drawCurrents();
+        } else {
+            drawCharges();
+        }
     }
 
     function drawCharges() {
         charges.forEach(charge => {
+            
             ctx.beginPath();
             ctx.arc(charge.x, charge.y, chargeSize, 0, 2 * Math.PI, false);
             ctx.fillStyle = charge.charge > 0 ? 'red' : 'blue';
             ctx.fill();
+            if (charge === selectedCharge) {
+                ctx.strokeStyle = 'black';
+                ctx.lineWidth = 2;
+            } else {
+                ctx.strokeStyle = 'grey';
+                ctx.lineWidth = 1;
+            }
             ctx.stroke();
+        });
+    }
+
+    function drawCurrents() {
+        // Interpret the charges as currents. If current is positive, show as a 
+        // circle with a dot in the centre. If current is negative, show as a circle with
+        // a cross through it
+        charges.forEach(charge => {
+            ctx.beginPath();
+            ctx.arc(charge.x, charge.y, chargeSize, 0, 2 * Math.PI, false);
+            ctx.fillStyle = 'white';
+            ctx.fill();
+            ctx.stroke();
+            ctx.beginPath();
+            if (charge.charge>0) {
+                ctx.arc(charge.x, charge.y, chargeSize / 4, 0, 2 * Math.PI, false);
+                ctx.fillStyle = 'black';
+                ctx.fill();
+                ctx.stroke();
+            } else if (charge.charge < 0) {
+                ctx.beginPath();
+                ctx.moveTo(charge.x - chargeSize / 2, charge.y - chargeSize / 2);
+                ctx.lineTo(charge.x + chargeSize / 2, charge.y + chargeSize / 2);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(charge.x + chargeSize / 2, charge.y - chargeSize / 2);
+                ctx.lineTo(charge.x - chargeSize / 2, charge.y + chargeSize / 2);
+                ctx.stroke();
+            }
         });
     }
 
     function addCharge(x, y, charge) {
         charges.push({x, y, charge});
         drawVectorField();
+        selectCharge(charges[charges.length - 1]);
     }
 
+    function outputNumpyArray() {
+        // sample the field along the x axis, with y set equal to charges[0].y, and
+        // output to a string that can be parsed by numpy for debug purposes
+        const y = charges[0].y;
+        const x_values = [];
+        const u_values = [];
+        const v_values = [];
+        for (let x = 0; x < rect.width; x += 10) {
+            const E = computeField(field, x, y);
+            x_values.push(x);
+            u_values.push(E[0]);
+            v_values.push(E[1]);
+        }
+
+        const x_ar = ('x = np.array(' + JSON.stringify(x_values) + ');');
+        const u_ar = ('u = np.array(' + JSON.stringify(u_values) + ');');
+        const v_ar = ('v = np.array(' + JSON.stringify(v_values) + ')');
+
+        // set the contents of dom element id numpy-output to x_ar+u_ar+v_ar
+        
+        console.log(x_ar);
+        console.log(u_ar);
+        console.log(v_ar);
+
+        navigator.clipboard.writeText(x_ar + u_ar + v_ar);
+    }
+
+
+    let originalChargeX = 0;
+    let originalChargeY = 0;
+
     canvas.addEventListener('mousedown', (event) => {
+        deselectCharge();
         const {offsetX, offsetY} = event;
         for (const charge of charges) {
             const dx = offsetX - charge.x;
@@ -208,6 +327,8 @@ export async function main() {
                 draggingCharge = charge;
                 draggingOffsetX = dx;
                 draggingOffsetY = dy;
+                originalChargeX = charge.x;
+                originalChargeY = charge.y;
                 break;
             }
         }
@@ -217,26 +338,20 @@ export async function main() {
         if (draggingCharge) {
             draggingCharge.x = event.offsetX - draggingOffsetX;
             draggingCharge.y = event.offsetY - draggingOffsetY;
+            
             drawVectorField();
         }
     });
 
     canvas.addEventListener('mouseup', () => {
+        if(draggingCharge===null) return;
+        if(!(Math.abs(originalChargeX - draggingCharge.x) > 3 || Math.abs(originalChargeY - draggingCharge.y) > 3)) {           
+            selectCharge(draggingCharge);
+        }
+
         draggingCharge = null;
     });
 
-    canvas.addEventListener('click', (event) => {
-        const {offsetX, offsetY} = event;
-        const charge = charges.find(charge => {
-            const dx = offsetX - charge.x;
-            const dy = offsetY - charge.y;
-            return Math.sqrt(dx * dx + dy * dy) < 10;
-        });
-        deselectCharge();
-        if (charge) {
-            selectCharge(charge);
-        } 
-    });
 
     canvas.addEventListener('mouseleave', () => {
         draggingCharge = null;

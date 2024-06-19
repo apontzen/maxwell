@@ -28,13 +28,18 @@
             border-radius: 5px;
             border: 1px solid #ccc;
         }
-        .charge-properties {
-            display: none; // hide charge properties by default
+        div.charge-properties {
+            display: none;
+            background-color: rgba(255, 255, 255, 0.8);
+            border-color: grey;
+            border-radius: 5px;
+            padding: 10px;
         }
+
     </style>
 </head>
 <body>
-    <h1>Vector Field Visualization</h1>
+    <h1>Field Visualization</h1>
     <div class="controls">
         <label for="plotType">Plot Type:</label>
         <select id="plotType">
@@ -45,15 +50,16 @@
         <select id="solver">
             <option value="electrostatic_direct">Electrostatic Direct</option>
             <option value="electrostatic_fourier" selected>Electrostatic Fourier</option>
+            <option value="magnetostatic_direct">Magentostatic Direct</option>
         </select>
 
-        <button id="addPositiveCharge">Add Positive Charge</button>
-        <button id="addNegativeCharge">Add Negative Charge</button>
+        <button id="addPositiveCharge">Add Positive <span class="charge_or_current">Charge</span></button>
+        <button id="addNegativeCharge">Add Negative <span class="charge_or_current">Charge</span></button>
     </div>
     <div class="charge-properties">
-        <label for="charge">Charge:</label>
+        <label for="charge"><span class="charge_or_current">Charge</span>:</label>
         <input type="range" id="charge" min="-10" max="10" step="1" value="${charge.charge}">
-        <button id="deleteCharge">Delete Charge</button>
+        <button id="deleteCharge">Delete <span class="charge_or_current">Charge</span></button>
     </div>
     <canvas id="vectorFieldCanvas" width="800" height="600"></canvas>
 
