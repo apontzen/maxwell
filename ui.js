@@ -21,7 +21,7 @@ export async function main() {
     let draggingOffsetX = 0;
     let draggingOffsetY = 0;
 
-    let cic_resolution = 600;
+    let cic_resolution = 300;
 
     const dpr = window.devicePixelRatio || 1;
 
@@ -43,14 +43,19 @@ export async function main() {
 
     let computeField = compute_field_electrostatic_direct;
     let field = null;
+
+    let dynamic = false;
     
     function updateSolverType() {
         // get value of solver
         const solverType = document.getElementById('solver').value;
+        
+        dynamic = solverType === 'dynamic';
+
         if (solverType === 'electrostatic_direct') {
             updateChargeOrCurrentLabel('Charge');
             computeField = compute_field_electrostatic_direct;
-        } else if (solverType === 'electrostatic_fourier') {
+        } else if (solverType === 'electrostatic_fourier' || solverType === 'dynamic') {
             updateChargeOrCurrentLabel('Charge');
             computeField = compute_field_electrostatic_fourier;
         } else if (solverType === 'magnetostatic_direct') { 
@@ -69,6 +74,12 @@ export async function main() {
         drawVectorField();
     });
 
+    function tickField() {
+        field.tick(0.1);
+        drawVectorField();
+
+    }
+
     function drawVectorField() {
         const plotType = plotTypeSelect.value;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -82,7 +93,10 @@ export async function main() {
         }
 
         drawChargesOrCurrents();
-        // outputNumpyArray();
+
+
+        if(dynamic)
+            setTimeout(tickField, 20); // Redraw the field after 0.02 seconds
     }
 
     function updateChargeOrCurrentLabel(charge_or_current) {
@@ -96,7 +110,6 @@ export async function main() {
     function generateVectors() {
         const vectors = [];
         const step = 20;
-        field.set_charges(charges);
 
         for (let x = 0; x < rect.width; x += step) {
             for (let y = 0; y < rect.height; y += step) {
@@ -180,9 +193,14 @@ export async function main() {
         drawVectorField();
     });
 
+    function deleteCharge(charge) {
+        charges = charges.filter(c => c !== charge);
+        field.set_charges(charges);
+    }
+
     const deleteChargeBtn = document.getElementById('deleteCharge');
     deleteChargeBtn.addEventListener('click', () => {
-        charges = charges.filter(c => c !== selectedCharge);
+        deleteCharge(selectedCharge);
         deselectCharge();
         drawVectorField();
     });
@@ -293,6 +311,7 @@ export async function main() {
     function addCharge(x, y, charge) {
         charges.push({x, y, charge});
         deselectCharge();
+        field.set_charges(charges);
         drawVectorField();
     }
 
@@ -327,20 +346,56 @@ export async function main() {
     let originalChargeX = 0;
     let originalChargeY = 0;
 
-    canvas.addEventListener('mousedown', (event) => {
-        deselectCharge();
-        const {offsetX, offsetY} = event;
-        for (const charge of charges) {
+    function getChargeFromEvent(event) {
+        const { offsetX, offsetY } = event;
+        for (let i = charges.length - 1; i >= 0; i--) {
+            // go in reverse order so that the charge on top is selected first
+            const charge = charges[i];
             const dx = offsetX - charge.x;
             const dy = offsetY - charge.y;
             if (Math.sqrt(dx * dx + dy * dy) < 10) {
-                draggingCharge = charge;
-                draggingOffsetX = dx;
-                draggingOffsetY = dy;
-                originalChargeX = charge.x;
-                originalChargeY = charge.y;
-                break;
+                return charge;
             }
+        }
+        return null;
+    }
+
+    canvas.addEventListener('mousedown', (event) => {
+        deselectCharge();
+        draggingCharge = getChargeFromEvent(event);
+        if (draggingCharge) {
+            draggingOffsetX = event.offsetX - draggingCharge.x;
+            draggingOffsetY = event.offsetY - draggingCharge.y;
+            originalChargeX = draggingCharge.x;
+            originalChargeY = draggingCharge.y;
+        }
+    });
+
+    canvas.addEventListener('mousemove', (event) => {
+        if (draggingCharge) {
+            draggingCharge.x = event.offsetX - draggingOffsetX;
+            draggingCharge.y = event.offsetY - draggingOffsetY;
+            field.set_charges(charges);
+            drawVectorField();
+        }
+    });
+
+    canvas.addEventListener('mouseup', () => {
+        if (!draggingCharge) return;
+        if (!(Math.abs(originalChargeX - draggingCharge.x) > 3 || Math.abs(originalChargeY - draggingCharge.y) > 3)) {
+            selectCharge(draggingCharge);
+        }
+        draggingCharge = null;
+    });
+
+    canvas.addEventListener('dblclick', (event) => {
+        let existingCharge = getChargeFromEvent(event);
+        if (existingCharge) {
+            deleteCharge(existingCharge);
+        } else {
+            const { offsetX, offsetY } = event;
+            addCharge(offsetX, offsetY, 1);
+            selectCharge(charges[charges.length - 1]);
         }
     });
 
@@ -360,6 +415,17 @@ export async function main() {
         }
 
         draggingCharge = null;
+    });
+
+    canvas.addEventListener('dblclick', (event) => {
+        const {offsetX, offsetY} = event;
+        var existingCharge = getChargeFromEvent(event);
+        if (existingCharge) {
+            deleteCharge
+            return;
+        }
+        addCharge(offsetX, offsetY, 1); 
+        selectCharge(charges[charges.length - 1]); 
     });
 
 

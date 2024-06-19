@@ -5,7 +5,6 @@ use console_error_panic_hook;
 use web_sys::console as console;
 use ndarray::{Array2};
 use std::fmt::{self, Debug, Formatter};
-use num_complex::Complex;
 
 mod stencil;
 mod fourier;
@@ -24,14 +23,6 @@ pub struct Charge {
     x: f64,
     y: f64,
     charge: f64,
-}
-
-#[wasm_bindgen]
-#[derive(Serialize, Deserialize)]
-pub struct Current {
-    x: f64,
-    y: f64,
-    jz: f64
 }
 
 #[wasm_bindgen]
@@ -56,23 +47,24 @@ pub struct FieldConfiguration {
     y_max: f64,
     nx: usize,
     ny: usize,
-    cic_grid: Option<Array2<Complex<f64>>>,
-    Ex_grid: Option<Array2<Complex<f64>>>,
-    Ey_grid: Option<Array2<Complex<f64>>>,
-    stencils: stencil::FourierStencils
+    cic_grid: Option<Array2<f64>>,
+    Ex_grid: Option<Array2<f64>>,
+    Ey_grid: Option<Array2<f64>>,
+    Bz_grid: Option<Array2<f64>>,
+    stencils: stencil::Stencils
 }
 
-pub fn evaluate_grid(field: &Array2<Complex<f64>>, x: i32, y: i32) -> f64 {
+pub fn evaluate_grid(field: &Array2<f64>, x: i32, y: i32) -> f64 {
     // Evaluate the field at the specified grid cell, or return 0 if x>=nx, y>=ny, x<0 or y<0
     let nx = field.shape()[0] as i32;
     let ny = field.shape()[1] as i32;
     if x < 0 || x >= nx || y < 0 || y >= ny {
         return 0.0;
     }
-    field[[x as usize, y as usize]].re
+    field[[x as usize, y as usize]]
 }
 
-pub fn evaluate_grid_interpolated_or_0(field_config: &FieldConfiguration, grid: &Option<Array2<Complex<f64>>>, x: f64, y: f64) -> f64 {
+pub fn evaluate_grid_interpolated_or_0(field_config: &FieldConfiguration, grid: &Option<Array2<f64>>, x: f64, y: f64) -> f64 {
     if let Some(grid) = grid {
         evaluate_grid_interpolated(field_config, grid, x, y)
     } else {
@@ -80,7 +72,7 @@ pub fn evaluate_grid_interpolated_or_0(field_config: &FieldConfiguration, grid: 
     }
 }
 
-pub fn evaluate_grid_interpolated(field_config: &FieldConfiguration, grid: &Array2<Complex<f64>>, x: f64, y: f64) -> f64 {
+pub fn evaluate_grid_interpolated(field_config: &FieldConfiguration, grid: &Array2<f64>, x: f64, y: f64) -> f64 {
     let nx = grid.shape()[0];
     let ny = grid.shape()[1];
 
@@ -131,8 +123,8 @@ impl FieldConfiguration {
     #[wasm_bindgen(constructor)]
     pub fn new(x_max: f64, y_max: f64, nx: usize, ny: usize) -> FieldConfiguration {
         FieldConfiguration { charges: vec![], x_max: x_max, y_max: y_max, nx: nx, ny: ny, 
-            cic_grid: None, Ex_grid: None, Ey_grid: None, 
-            stencils: stencil::FourierStencils::new(x_max, y_max, nx, ny) }
+            cic_grid: None, Ex_grid: None, Ey_grid: None, Bz_grid: None,
+            stencils: stencil::Stencils::new(x_max, y_max, nx, ny) }
     }
 
     pub fn set_charges(&mut self, charges: JsValue) {
@@ -150,7 +142,7 @@ impl FieldConfiguration {
 
 
     pub fn make_cic_grid(&mut self) {
-        self.cic_grid = Some(Array2::<Complex<f64>>::zeros((self.nx, self.ny)));
+        self.cic_grid = Some(Array2::<f64>::zeros((self.nx, self.ny)));
         let cell_area = self.x_max * self.y_max / (self.nx * self.ny) as f64;
         let charge_normalization = 4000.0 / cell_area;
         if let Some(ref mut grid) = self.cic_grid {
@@ -169,13 +161,16 @@ impl FieldConfiguration {
     pub fn make_E_grid(&mut self) {
         self.ensure_cic_grid();
 
-        let mut Ey: Array2<Complex<f64>> = self.cic_grid.as_ref().unwrap().clone();
+        let mut Ey: Array2<f64> = self.cic_grid.as_ref().unwrap().clone();
         let mut Ex = Ey.clone();
-        self.stencils.apply(&mut Ey, stencil::StencilType::GradYDelSquaredInv);
-        self.stencils.apply(&mut Ex, stencil::StencilType::GradXDelSquaredInv);
+        self.stencils.apply(&mut Ey, stencil::StencilType::GradYDelSquaredInv, stencil::DifferenceType::Forward);
+        self.stencils.apply(&mut Ex, stencil::StencilType::GradXDelSquaredInv, stencil::DifferenceType::Forward);
 
         self.Ey_grid = Some(Ey);
         self.Ex_grid = Some(Ex);
+        self.Bz_grid = Some(Array2::<f64>::zeros((self.nx, self.ny)));
+      
+        web_sys::console::log_2(&"Bz field initialized".into(), &self.Bz_grid.as_ref().unwrap()[[100,100]].into());
         
     }
 
@@ -195,6 +190,44 @@ impl FieldConfiguration {
         self.ensure_cic_grid();
         evaluate_grid_interpolated_or_0(self, &self.cic_grid, x, y)
     }
+
+    
+    pub fn tick(&mut self, delta_t: f64) {
+        self.ensure_E_grid();
+        // evolve Bz field first.
+        let mut Ex = self.Ex_grid.as_mut().unwrap();
+        let mut Ey = self.Ey_grid.as_mut().unwrap();
+        let mut Bz = self.Bz_grid.as_mut().unwrap();
+
+        let mut d_Ex_dy: Array2<f64> = self.stencils.apply_non_destructively(&Ex, stencil::StencilType::GradY, stencil::DifferenceType::Forward);
+        let mut d_Ey_dx: Array2<f64> = self.stencils.apply_non_destructively(&Ey, stencil::StencilType::GradX, stencil::DifferenceType::Forward);
+
+        let mut nan_count = 0;
+
+        
+
+        d_Ex_dy *= delta_t;
+        d_Ey_dx *= delta_t;
+
+        (*Bz) += &d_Ex_dy;
+        (*Bz) -= &d_Ey_dx;
+
+
+        // evolve Ex and Ey fields
+        let mut d_Bz_dy = self.stencils.apply_non_destructively(&Bz, stencil::StencilType::GradY, stencil::DifferenceType::Backward);
+        let mut d_Bz_dx = self.stencils.apply_non_destructively(&Bz, stencil::StencilType::GradX, stencil::DifferenceType::Backward);
+
+
+        d_Bz_dy *= delta_t;
+        d_Bz_dx *= delta_t;
+
+        (*Ex) += &d_Bz_dy;
+        (*Ey) -= &d_Bz_dx;
+
+        // (*Ex) -= &(delta_t * d_Bz_dy);
+        // (*Ey) += &(delta_t * d_Bz_dx);
+
+    }
 }
 
 impl FieldConfiguration {
@@ -206,6 +239,17 @@ impl FieldConfiguration {
         let Ey = evaluate_grid_interpolated_or_0(self, &self.Ey_grid, x, y);
         (Ex, Ey)
     }
+
+    pub fn count_nans(name: &str, grid: &Array2<f64>) {
+        let mut nan_count = 0;
+        for element in grid.iter() {
+            if element.is_nan() || element.is_infinite() {
+                nan_count += 1;
+            }
+        }
+        web_sys::console::log_1(&format!("Number of NaN values in {}: {}", name, nan_count).into());
+    }
+
 }
 
 
