@@ -84,6 +84,12 @@ export async function main() {
         const plotType = plotTypeSelect.value;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+        field.set_charges(charges);
+        if(!dynamic) {
+            field.reset_fields();
+            // if dynamic, the fields are being updated in real time and we don't want to reset them
+        }
+
         const vectors = generateVectors();
         
         if (plotType === 'quiver') {
@@ -194,7 +200,11 @@ export async function main() {
     });
 
     function deleteCharge(charge) {
+        console.log("charges before delete", charges);
+        console.log("deleting charge",charge);
         charges = charges.filter(c => c !== charge);
+        console.log("charges after delete", charges);
+        console.log("charge after delete", charge);
         field.set_charges(charges);
     }
 
@@ -390,9 +400,13 @@ export async function main() {
 
     canvas.addEventListener('dblclick', (event) => {
         let existingCharge = getChargeFromEvent(event);
-        if (existingCharge) {
+        console.log("double click existing charge", existingCharge)
+        if (existingCharge!==null) {
+            console.log("...going for delete charge");
+            deselectCharge();
             deleteCharge(existingCharge);
         } else {
+            console.log("...going for add charge");
             const { offsetX, offsetY } = event;
             addCharge(offsetX, offsetY, 1);
             selectCharge(charges[charges.length - 1]);
@@ -417,16 +431,6 @@ export async function main() {
         draggingCharge = null;
     });
 
-    canvas.addEventListener('dblclick', (event) => {
-        const {offsetX, offsetY} = event;
-        var existingCharge = getChargeFromEvent(event);
-        if (existingCharge) {
-            deleteCharge
-            return;
-        }
-        addCharge(offsetX, offsetY, 1); 
-        selectCharge(charges[charges.length - 1]); 
-    });
 
 
     canvas.addEventListener('mouseleave', () => {

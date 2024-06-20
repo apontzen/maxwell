@@ -135,9 +135,13 @@ impl FieldConfiguration {
                 vec![]
             }
         };
+    }
+
+    pub fn reset_fields(&mut self) {
         self.cic_grid = None;
         self.Ex_grid = None;
         self.Ey_grid = None;
+        self.Bz_grid = None;
     }
 
 
