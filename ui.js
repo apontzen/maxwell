@@ -200,11 +200,7 @@ export async function main() {
     });
 
     function deleteCharge(charge) {
-        console.log("charges before delete", charges);
-        console.log("deleting charge",charge);
         charges = charges.filter(c => c !== charge);
-        console.log("charges after delete", charges);
-        console.log("charge after delete", charge);
         field.set_charges(charges);
     }
 
@@ -400,13 +396,10 @@ export async function main() {
 
     canvas.addEventListener('dblclick', (event) => {
         let existingCharge = getChargeFromEvent(event);
-        console.log("double click existing charge", existingCharge)
         if (existingCharge!==null) {
-            console.log("...going for delete charge");
             deselectCharge();
             deleteCharge(existingCharge);
         } else {
-            console.log("...going for add charge");
             const { offsetX, offsetY } = event;
             addCharge(offsetX, offsetY, 1);
             selectCharge(charges[charges.length - 1]);
