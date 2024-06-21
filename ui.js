@@ -410,8 +410,8 @@ export async function main() {
         if (draggingCharge) {
             draggingCharge.x = event.offsetX - draggingOffsetX;
             draggingCharge.y = event.offsetY - draggingOffsetY;
-            
-            drawVectorField();
+            if(!dynamic)    
+                drawVectorField();
         }
     });
 

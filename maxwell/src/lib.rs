@@ -245,45 +245,51 @@ impl FieldConfiguration {
         }
 
         for (charge_earlier, charge_now) in self.charges_at_last_tick.iter().zip(self.charges.iter()) {
+            
             if charge_earlier.charge != charge_now.charge {
                 panic!("Strength of a charge changed since last tick");
             }
+
             let (i_earlier, j_earlier) = charge_earlier.get_location_on_grid(&self.geometry);
             let (i_now, j_now) = charge_now.get_location_on_grid(&self.geometry);
-
-            // TEMPORARY SIMPLIFICATION TO X ONLY
-            let j_earlier = self.geometry.ny/2; 
-            let j_now = self.geometry.ny/2;
 
             if i_earlier == i_now && j_earlier == j_now {
                 continue;
             }
-            let mut di: i32 = 0; // offset from i_earlier for current point on path
-            let mut dj: i32 = 0; // offset from j_earlier for currrnt point on path
-            let delta_i = (i_now as i32 - i_earlier as i32); // endpoint has di == delta_i
-            let delta_j = (i_now as i32 - i_earlier as i32); // endpoint has dj == delta_j
 
-            // the current should be the charge density times the velocity averaged over the timestep
+            let delta_i = i_now as i32 - i_earlier as i32; // endpoint has di == delta_i
+            let delta_j = j_now as i32 - j_earlier as i32; // endpoint has dj == delta_j
+
+            let i_min = i_earlier.min(i_now);
+            let i_max = i_earlier.max(i_now);
+            let j_min = j_earlier.min(j_now);
+            let j_max = j_earlier.max(j_now);
+
+            // The current should be the charge density times the velocity averaged over the timestep
             // Note that if we are stepping more than one cell, the velocity is increased by a factor that is
             // precisely offset by the decrease in the weighting from time-averaging
-            let x_factor = charge_now.charge * self.charge_normalization * self.geometry.delta_x() / delta_t;
-            let y_factor = charge_now.charge * self.charge_normalization * self.geometry.delta_y() / delta_t;
+
+            let x_current_density = (delta_i.signum() as f64) * charge_now.charge * self.charge_normalization * self.geometry.delta_x() / delta_t;
+            let y_current_density = (delta_j.signum() as f64) * charge_now.charge * self.charge_normalization * self.geometry.delta_y() / delta_t;
             
+            // Due to the relative grid alignment of current compared to charge fields, the current always runs from i_min inclusive 
+            // to i_max exclusive (regardless of the direction of motion). Similarly for j_min and j_max.
 
-            while dj!=delta_j {
-                jy[[(i_earlier as i32 + di) as usize, (j_earlier as i32 +dj) as usize]] = y_factor * (delta_j.signum() as f64);
-                dj+=delta_j.signum()
+            // On the assumption that the path length in a single frame is small, we just go along the x then the y direction rather
+            // than anything fancier than that.
+
+            for i in i_min..i_max {
+                jx[[i, j_earlier]] = x_current_density;
             }
 
-            while di!=delta_i {
-                jx[[(i_earlier as i32 + di) as usize, (j_earlier as i32 + dj) as usize]] = x_factor * (delta_i.signum() as f64);
-                di+=delta_i.signum()
+            for j in j_min..j_max {
+                jy[[i_now, j]] = y_current_density;
             }
-
-            console::log_2(&"Charge moved:".into(), &format!("{:?} -> {:?}", charge_earlier, charge_now).into());
- 
+            
+            // Now apply the stencils to smooth the current density field, in just the same way as the charge density field is smoothed
             self.stencils.apply(jx, stencil::StencilType::Soften, stencil::DifferenceType::Central);
             self.stencils.apply(jy, stencil::StencilType::Soften, stencil::DifferenceType::Central);
+
 
         }
         
@@ -293,6 +299,7 @@ impl FieldConfiguration {
     pub fn tick(&mut self, delta_t: f64) {
         self.ensure_initialized();
         self.make_currents(delta_t);
+        self.charges_at_last_tick = self.charges.clone();
 
         // Evolve the fields by one timestep. Note that the B and density fields are half a tick behind and half a grid cell
         // to the left of the E and j fields.
@@ -323,15 +330,16 @@ impl FieldConfiguration {
         d_Bz_dx *= delta_t;
 
         (*Ex) += &d_Bz_dy;
+        
         (*Ey) -= &d_Bz_dx;
 
-        (*Ex) += &(jx*delta_t);
-        (*Ey) += &(jy*delta_t);
+        (*Ex) -= &(jx*delta_t);
+        (*Ey) -= &(jy*delta_t);
 
         // (*Ex) -= &(delta_t * d_Bz_dy);
         // (*Ey) += &(delta_t * d_Bz_dx);
 
-        self.charges_at_last_tick = self.charges.clone();
+        
 
     }
 }
