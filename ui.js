@@ -75,7 +75,7 @@ export async function main() {
     });
 
     function tickField() {
-        field.tick(0.1);
+        field.tick(0.5);
         drawVectorField();
 
     }

@@ -5,11 +5,10 @@ use console_error_panic_hook;
 use web_sys::console as console;
 use ndarray::{Array2};
 use std::fmt::{self, Debug, Formatter};
+use num::integer::gcd;
 
 mod stencil;
 mod fourier;
-
-use fourier::array_fft;
 
 #[wasm_bindgen]
 pub fn init_panic_hook() {
@@ -56,6 +55,16 @@ pub struct Geometry {
     ny: usize,
 }
 
+impl Geometry {
+    fn delta_x(&self) -> f64 {
+        self.x_max / self.nx as f64
+    }
+
+    fn delta_y(&self) -> f64 {
+        self.y_max / self.ny as f64
+    }
+}
+
 #[wasm_bindgen]
 pub struct FieldConfiguration {
     charges: Vec<Charge>,
@@ -67,7 +76,8 @@ pub struct FieldConfiguration {
     jx_grid: Option<Array2<f64>>,
     jy_grid: Option<Array2<f64>>,
     Bz_grid: Option<Array2<f64>>,
-    stencils: stencil::Stencils
+    stencils: stencil::Stencils,
+    charge_normalization: f64,
 }
 
 pub fn evaluate_grid(field: &Array2<f64>, x: i32, y: i32) -> f64 {
@@ -138,10 +148,12 @@ pub fn evaluate_grid_interpolated(field_config: &FieldConfiguration, grid: &Arra
 impl FieldConfiguration {
     #[wasm_bindgen(constructor)]
     pub fn new(x_max: f64, y_max: f64, nx: usize, ny: usize) -> FieldConfiguration {
+        let cell_area = x_max * y_max / (nx * ny) as f64;
+        let charge_normalization = 4000.0 / cell_area;
         FieldConfiguration { charges: vec![], charges_at_last_tick: vec![], 
             geometry: Geometry{x_max: x_max, y_max: y_max, nx: nx, ny: ny}, 
             cic_grid: None, Ex_grid: None, Ey_grid: None, Bz_grid: None, jx_grid: None, jy_grid: None,
-            stencils: stencil::Stencils::new(x_max, y_max, nx, ny) }
+            stencils: stencil::Stencils::new(x_max, y_max, nx, ny), charge_normalization }
     }
 
     pub fn set_charges(&mut self, charges: JsValue) {
@@ -166,8 +178,7 @@ impl FieldConfiguration {
 
     pub fn make_cic_grid(&mut self) {
         self.cic_grid = Some(Array2::<f64>::zeros((self.geometry.nx, self.geometry.ny)));
-        let cell_area = self.geometry.x_max * self.geometry.y_max / (self.geometry.nx * self.geometry.ny) as f64;
-        let charge_normalization = 4000.0 / cell_area;
+        
         if let Some(ref mut grid) = self.cic_grid {
             for charge in &self.charges {
                 if(charge.x<0.0 || charge.x>self.geometry.x_max || charge.y<0.0 || charge.y>self.geometry.y_max) {
@@ -175,8 +186,10 @@ impl FieldConfiguration {
                     continue;
                 }
                 let (i,j) = charge.get_location_on_grid(&self.geometry);
-                grid[[i, j]] += charge.charge * charge_normalization; // CIC charge 
+                grid[[i, j]] += charge.charge * self.charge_normalization; // CIC charge 
             }
+
+            self.stencils.apply(grid, stencil::StencilType::Soften, stencil::DifferenceType::Central);
         }
     }
 
@@ -216,23 +229,64 @@ impl FieldConfiguration {
         evaluate_grid_interpolated_or_0(self, &self.cic_grid, x, y)
     }
 
-    pub fn make_currents(&self, delta_t: f64) {
+    pub fn make_currents(&mut self, delta_t: f64) {
         // Compute the current density from the charge density and the charge density at the last tick.
         // 
         // This is calculated by finding an approximate straight line between the locations of the charges
-
+        
+        let jx = self.jx_grid.as_mut().unwrap();
+        let jy = self.jy_grid.as_mut().unwrap();
+        
+        jx.fill(0.0);
+        jy.fill(0.0);
+    
         if self.charges.len() != self.charges_at_last_tick.len() {
             panic!("Number of charges changed since last tick");
         }
 
         for (charge_earlier, charge_now) in self.charges_at_last_tick.iter().zip(self.charges.iter()) {
+            if charge_earlier.charge != charge_now.charge {
+                panic!("Strength of a charge changed since last tick");
+            }
             let (i_earlier, j_earlier) = charge_earlier.get_location_on_grid(&self.geometry);
             let (i_now, j_now) = charge_now.get_location_on_grid(&self.geometry);
+
+            // TEMPORARY SIMPLIFICATION TO X ONLY
+            let j_earlier = self.geometry.ny/2; 
+            let j_now = self.geometry.ny/2;
+
             if i_earlier == i_now && j_earlier == j_now {
                 continue;
             }
+            let mut di: i32 = 0; // offset from i_earlier for current point on path
+            let mut dj: i32 = 0; // offset from j_earlier for currrnt point on path
+            let delta_i = (i_now as i32 - i_earlier as i32); // endpoint has di == delta_i
+            let delta_j = (i_now as i32 - i_earlier as i32); // endpoint has dj == delta_j
+
+            // the current should be the charge density times the velocity averaged over the timestep
+            // Note that if we are stepping more than one cell, the velocity is increased by a factor that is
+            // precisely offset by the decrease in the weighting from time-averaging
+            let x_factor = charge_now.charge * self.charge_normalization * self.geometry.delta_x() / delta_t;
+            let y_factor = charge_now.charge * self.charge_normalization * self.geometry.delta_y() / delta_t;
+            
+
+            while dj!=delta_j {
+                jy[[(i_earlier as i32 + di) as usize, (j_earlier as i32 +dj) as usize]] = y_factor * (delta_j.signum() as f64);
+                dj+=delta_j.signum()
+            }
+
+            while di!=delta_i {
+                jx[[(i_earlier as i32 + di) as usize, (j_earlier as i32 + dj) as usize]] = x_factor * (delta_i.signum() as f64);
+                di+=delta_i.signum()
+            }
+
             console::log_2(&"Charge moved:".into(), &format!("{:?} -> {:?}", charge_earlier, charge_now).into());
+ 
+            self.stencils.apply(jx, stencil::StencilType::Soften, stencil::DifferenceType::Central);
+            self.stencils.apply(jy, stencil::StencilType::Soften, stencil::DifferenceType::Central);
+
         }
+        
 
     }
     
@@ -247,6 +301,8 @@ impl FieldConfiguration {
         let mut Ex = self.Ex_grid.as_mut().unwrap();
         let mut Ey = self.Ey_grid.as_mut().unwrap();
         let mut Bz = self.Bz_grid.as_mut().unwrap();
+        let jx = self.jx_grid.as_ref().unwrap();
+        let jy = self.jy_grid.as_ref().unwrap();
 
         let mut d_Ex_dy: Array2<f64> = self.stencils.apply_non_destructively(&Ex, stencil::StencilType::GradY, stencil::DifferenceType::Forward);
         let mut d_Ey_dx: Array2<f64> = self.stencils.apply_non_destructively(&Ey, stencil::StencilType::GradX, stencil::DifferenceType::Forward);
@@ -268,6 +324,9 @@ impl FieldConfiguration {
 
         (*Ex) += &d_Bz_dy;
         (*Ey) -= &d_Bz_dx;
+
+        (*Ex) += &(jx*delta_t);
+        (*Ey) += &(jy*delta_t);
 
         // (*Ex) -= &(delta_t * d_Bz_dy);
         // (*Ey) += &(delta_t * d_Bz_dx);

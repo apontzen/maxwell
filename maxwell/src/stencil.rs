@@ -4,7 +4,7 @@ use crate::fourier;
 
 pub struct Stencils {
     pub del_squared_inv: Option<Array2<Complex<f64>>>,
-   
+    pub soften: Option<Array2<Complex<f64>>>,
     size_x: f64,
     size_y: f64,
     nx: usize,
@@ -18,6 +18,7 @@ pub enum StencilType {
     GradY,
     GradXDelSquaredInv,
     GradYDelSquaredInv,
+    Soften,
 }
 
 pub enum DifferenceType {
@@ -28,8 +29,9 @@ pub enum DifferenceType {
 
 impl Stencils {
     pub fn new(size_x: f64, size_y: f64, nx: usize, ny: usize) -> Stencils {
-        let mut s = Stencils { del_squared_inv: None, size_x, size_y, nx, ny};
+        let mut s = Stencils { del_squared_inv: None, soften: None, size_x, size_y, nx, ny};
         s.init_inv_laplacian();
+        s.init_soften();
         s
     }
 
@@ -42,11 +44,18 @@ impl Stencils {
         self.del_squared_inv = Some(del_squared_inv);
     }
 
-    fn apply_inv_laplacian(&self, array: &mut Array2<f64>) {
+    fn init_soften(&mut self) {
+        let mut soften = self.make_soften_stencil();
+        fourier::array_fft(&mut soften);
+        fourier::array_fft_renormalise(&mut soften);
+        self.soften = Some(soften);
+    }
+
+    fn apply_fourier_stencil(&self, array: &mut Array2<f64>, fourier_stencil: &Array2<Complex<f64>>) {
         let mut result = Array2::<Complex<f64>>::zeros(array.dim());
         result.zip_mut_with(array, |r, &a| *r = Complex::new(a, 0.0));
         fourier::array_fft(&mut result);
-        (result) *= self.del_squared_inv.as_ref().unwrap();
+        (result) *= fourier_stencil;
         fourier::array_ifft(&mut result);
         array.zip_mut_with(&result, |a, &r| *a = r.re);
     }
@@ -77,9 +86,44 @@ impl Stencils {
         result[[1,0]] = dx2_inv;
         result[[0,self.ny-1]] = dy2_inv;
         result[[0,1]] = dy2_inv;
+
+        result
+    }
+
+    pub fn make_soften_stencil(&self) -> Array2<Complex<f64>> {
+        let mut result = Array2::<Complex<f64>>::zeros((self.nx, self.ny));
+        
+        let dx = self.size_x / self.nx as f64;
+        let dy = self.size_y / self.ny as f64;
+
+        let sigma_x = 0.01 * self.size_x;
+        let sigma_y = 0.01 * self.size_y;
+
+        // Instead of analytically computing the gaussian norm, we compute it numerically so that
+        // aliasing errors are taken into account
+        let mut norm: Complex<f64> = Complex::new(0.0, 0.0); 
+
+        // result[[0,0]] = Complex::new(1.0, 0.0);
+ 
+        for i in 0..self.nx {
+            for j in 0..self.ny {
+                let mut x = i as f64*dx;
+                let mut y = j as f64*dy;
+                if x > self.size_x/2.0 {
+                    x = self.size_x - x;
+                }
+                if y > self.size_y/2.0 {
+                    y = self.size_y - y;
+                }
+                let exponent = -((x * x) / (2.0 * sigma_x * sigma_x) + (y * y) / (2.0 * sigma_y * sigma_y));
+                result[[i, j]] = Complex::new( exponent.exp(), 0.0);
+                norm += result[[i, j]];
+            }
+        }
+
+        result /=norm;
         
         result
-        
     }
 
     pub fn apply_grad_x_stencil(&self, array: & Array2<f64>, result: &mut Array2<f64>, difference_type: DifferenceType) {
@@ -124,7 +168,12 @@ impl Stencils {
         let mut scratch = array.clone();
         
         match stencil_type {
-            StencilType::GradXDelSquaredInv | StencilType::GradYDelSquaredInv => self.apply_inv_laplacian(&mut scratch),
+            StencilType::GradXDelSquaredInv | StencilType::GradYDelSquaredInv => {
+                self.apply_fourier_stencil(&mut scratch, self.del_squared_inv.as_ref().unwrap())
+            },
+            StencilType::Soften => {
+                self.apply_fourier_stencil(&mut scratch, self.soften.as_ref().unwrap())
+            },
             _ => ()
         };
         

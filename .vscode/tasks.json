@@ -13,7 +13,7 @@
 			}
 		},
 		{	
-			"type": "cargo",
+			"type": "shell",
 			"command": "cargo",
 			"args": [
 				"build",
