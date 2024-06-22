@@ -70,27 +70,41 @@ export async function main() {
     updateSolverType();
 
     let animation_request_id = null;
+    let last_time = null;
 
     document.getElementById('solver').addEventListener('change', () => {
         if(animation_request_id!==null)
             window.cancelAnimationFrame(animation_request_id);
         animation_request_id = null;
+        last_time = null;
         updateSolverType();
         drawVectorField();
         if(dynamic)
             animation_request_id = window.requestAnimationFrame(tickField);
     });
 
-    function tickField() {
+    function tickField(time_now) {
         animation_request_id = null;
-        for(let i = 0; i < 4; i++)
-            field.tick(0.5);
-        // tick the field forward 4 times for every redraw
-        // The 0.5 value above indicates that delta_t = 0.5c/delta_x, to satisfy the CFL stability condition
-        // note this means the user-experienced speed of light depends on delta_x, which in turn depends
-        // on the number of cic cells. 
-        // TODO: currently the refresh rate will therefore change the presented speed of light!!
+
+        let dt = 0;
+        if (last_time === null) {
+            last_time = time_now;
+        } else {
+            dt = time_now - last_time;
+        }
+
+
+        if(dt<10.0) {
+            field.tick(0.7*dt/10.0);
+        } else {
+            field.tick(0.7);
+        }
+ 
+        last_time = time_now;
         drawVectorField();
+ 
+
+        // only request the next frame if we're still solving dynamically
         if(dynamic)
             animation_request_id = window.requestAnimationFrame(tickField);
 
