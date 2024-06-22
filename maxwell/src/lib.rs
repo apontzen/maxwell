@@ -4,11 +4,12 @@ use serde_wasm_bindgen::{from_value, to_value};
 use console_error_panic_hook;
 use web_sys::console as console;
 use ndarray::{Array2};
-use std::fmt::{self, Debug, Formatter};
+use std::{f32::consts::E, fmt::{self, Debug, Formatter}};
 use num::integer::gcd;
 
 mod stencil;
 mod fourier;
+mod pml;
 
 #[wasm_bindgen]
 pub fn init_panic_hook() {
@@ -76,6 +77,7 @@ pub struct FieldConfiguration {
     jx_grid: Option<Array2<f64>>,
     jy_grid: Option<Array2<f64>>,
     Bz_grid: Option<Array2<f64>>,
+    Bz_integral_grid: Option<Array2<f64>>, /// Bz field integrated over time, for use in the PML boundary conditions
     stencils: stencil::Stencils,
     charge_normalization: f64,
 }
@@ -152,7 +154,7 @@ impl FieldConfiguration {
         let charge_normalization = 4000.0 / cell_area;
         FieldConfiguration { charges: vec![], charges_at_last_tick: vec![], 
             geometry: Geometry{x_max: x_max, y_max: y_max, nx: nx, ny: ny}, 
-            cic_grid: None, Ex_grid: None, Ey_grid: None, Bz_grid: None, jx_grid: None, jy_grid: None,
+            cic_grid: None, Ex_grid: None, Ey_grid: None, Bz_grid: None, Bz_integral_grid: None, jx_grid: None, jy_grid: None,
             stencils: stencil::Stencils::new(x_max, y_max, nx, ny), charge_normalization }
     }
 
@@ -171,6 +173,7 @@ impl FieldConfiguration {
         self.Ex_grid = None;
         self.Ey_grid = None;
         self.Bz_grid = None;
+        self.Bz_integral_grid = None;
         self.jx_grid = None;
         self.jy_grid = None;
     }
@@ -204,6 +207,7 @@ impl FieldConfiguration {
         self.Ey_grid = Some(Ey);
         self.Ex_grid = Some(Ex);
         self.Bz_grid = Some(Array2::<f64>::zeros((self.geometry.nx, self.geometry.ny)));
+        self.Bz_integral_grid = Some(Array2::<f64>::zeros((self.geometry.nx, self.geometry.ny)));
 
         self.jx_grid = Some(Array2::<f64>::zeros((self.geometry.nx, self.geometry.ny)));
         self.jy_grid = Some(Array2::<f64>::zeros((self.geometry.nx, self.geometry.ny)));
@@ -245,7 +249,7 @@ impl FieldConfiguration {
         }
 
         for (charge_earlier, charge_now) in self.charges_at_last_tick.iter().zip(self.charges.iter()) {
-            
+
             if charge_earlier.charge != charge_now.charge {
                 panic!("Strength of a charge changed since last tick");
             }
@@ -305,11 +309,19 @@ impl FieldConfiguration {
         // to the left of the E and j fields.
 
         // Evolve Bz field first.
-        let mut Ex = self.Ex_grid.as_mut().unwrap();
-        let mut Ey = self.Ey_grid.as_mut().unwrap();
-        let mut Bz = self.Bz_grid.as_mut().unwrap();
+        let Ex = self.Ex_grid.as_mut().unwrap();
+        let Ey = self.Ey_grid.as_mut().unwrap();
+        let Bz = self.Bz_grid.as_mut().unwrap();
+        let Bz_integral = self.Bz_integral_grid.as_mut().unwrap();
         let jx = self.jx_grid.as_ref().unwrap();
         let jy = self.jy_grid.as_ref().unwrap();
+
+
+        // add PML damping to the Bz field
+        for (i, j, sigma_x, sigma_y) in pml::pml_iterator_from_geometry(&self.geometry) {
+            Bz[[i,j]] += (-(sigma_x+sigma_y) * Bz[[i, j]])*delta_t; // + sigma_x*sigma_y * Bz_integral[[i,j]]) * delta_t;
+        }
+
 
         let mut d_Ex_dy: Array2<f64> = self.stencils.apply_non_destructively(&Ex, stencil::StencilType::GradY, stencil::DifferenceType::Forward);
         let mut d_Ey_dx: Array2<f64> = self.stencils.apply_non_destructively(&Ey, stencil::StencilType::GradX, stencil::DifferenceType::Forward);
@@ -319,6 +331,11 @@ impl FieldConfiguration {
 
         (*Bz) += &d_Ex_dy;
         (*Bz) -= &d_Ey_dx;
+
+        
+        *Bz_integral += &(Bz as &_ * delta_t);
+
+        
 
 
         // evolve Ex and Ey fields
@@ -336,9 +353,16 @@ impl FieldConfiguration {
         (*Ex) -= &(jx*delta_t);
         (*Ey) -= &(jy*delta_t);
 
-        // (*Ex) -= &(delta_t * d_Bz_dy);
-        // (*Ey) += &(delta_t * d_Bz_dx);
+        // add PML damping to the Ex and Ey fields
+        for (i, j, sigma_x, sigma_y) in pml::pml_iterator_from_geometry(&self.geometry) {
+            let pml_x_term = -sigma_y * Ex[[i, j]]; // + sigma_x * self.stencils.evaluate(&Bz_integral, i, j, &stencil::StencilType::GradY, &stencil::DifferenceType::Backward);
+            let pml_y_term = -sigma_x * Ey[[i, j]]; //- sigma_y * self.stencils.evaluate(&Bz_integral, i, j, &stencil::StencilType::GradX, &stencil::DifferenceType::Backward) ;
+            Ex[[i,j]] += pml_x_term*delta_t;
+            Ey[[i,j]] += pml_y_term*delta_t;
+        }
 
+        
+    
         
 
     }

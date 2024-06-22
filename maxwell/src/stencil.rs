@@ -126,41 +126,43 @@ impl Stencils {
         result
     }
 
-    pub fn apply_grad_x_stencil(&self, array: & Array2<f64>, result: &mut Array2<f64>, difference_type: DifferenceType) {
-        let dx = self.size_x / self.nx as f64;
-        let dx_inv = 1.0/dx;
-        let dx_inv_by_2 = 0.5/dx;
-        let nx = array.dim().0;
-        let ny = array.dim().1;
-        for i in 0..nx {
-            for j in 0..ny {
-                let i_plus_one = if(i<nx-1) {i+1} else {0};
-                let i_minus_one = if(i>0) {i-1} else {nx-1};
-                result[[i,j]] = match(difference_type) {
-                    DifferenceType::Forward => dx_inv * (array[[i_plus_one, j]] - array[[i, j]]),
-                    DifferenceType::Backward => dx_inv * (array[[i, j]] - array[[i_minus_one, j]]),
-                    DifferenceType::Central => dx_inv_by_2 * (array[[i_plus_one, j]] - array[[i_minus_one, j]]),
-                };
+    pub fn apply_grad(&self, array: & Array2<f64>, result: &mut Array2<f64>, stencil_type: StencilType, difference_type: DifferenceType) {
+        for i in 0..self.nx {
+            for j in 0..self.ny {
+                result[[i,j]] = self.evaluate(array, i, j, &stencil_type, &difference_type);
             }
         }
     }
 
-    pub fn apply_grad_y_stencil(&self, array: & Array2<f64>, result: &mut Array2<f64>, difference_type: DifferenceType)  {
+    pub fn evaluate(&self, array: &Array2<f64>, i: usize, j: usize, stencil_type: &StencilType, difference_type: &DifferenceType) -> f64 {
+        let dx = self.size_x / self.nx as f64;
+        let dx_inv = 1.0/dx;
+        let dx_inv_by_2 = 0.5/dx;
         let dy = self.size_y / self.ny as f64;
         let dy_inv = 1.0/dy;
         let dy_inv_by_2 = 0.5/(dy);
         let nx = array.dim().0;
         let ny = array.dim().1;
-        for i in 0..nx {
-            for j in 0..ny {
+        match stencil_type {
+            StencilType::GradX => {
+                let i_plus_one = if(i<nx-1) {i+1} else {0};
+                let i_minus_one = if(i>0) {i-1} else {nx-1};
+                match(difference_type) {
+                    DifferenceType::Forward => dx_inv * (array[[i_plus_one, j]] - array[[i, j]]),
+                    DifferenceType::Backward => dx_inv * (array[[i, j]] - array[[i_minus_one, j]]),
+                    DifferenceType::Central => dx_inv_by_2 * (array[[i_plus_one, j]] - array[[i_minus_one, j]]),
+                }
+            }, 
+            StencilType::GradY => {
                 let j_plus_one = if j < ny - 1 { j + 1 } else { 0 };
                 let j_minus_one = if j > 0 { j - 1 } else { ny - 1 };
-                result[[i,j]] = match(difference_type) {
+                match(difference_type) {
                     DifferenceType::Forward => dy_inv * (array[[i, j_plus_one]] - array[[i, j]]),
                     DifferenceType::Backward => dy_inv * (array[[i, j]] - array[[i, j_minus_one]]),
                     DifferenceType::Central => dy_inv_by_2 * (array[[i, j_plus_one]] - array[[i, j_minus_one]]),
-                };
-            }
+                }
+            },
+            _ => { panic!("Invalid stencil type for real-space evaluation") }
         }
     }
 
@@ -178,8 +180,8 @@ impl Stencils {
         };
         
         match stencil_type {
-            StencilType::GradXDelSquaredInv | StencilType::GradX => self.apply_grad_x_stencil(&scratch, array, difference_type),
-            StencilType::GradYDelSquaredInv | StencilType::GradY => self.apply_grad_y_stencil(&scratch, array, difference_type),
+            StencilType::GradXDelSquaredInv | StencilType::GradX => self.apply_grad(&scratch, array, StencilType::GradX, difference_type),
+            StencilType::GradYDelSquaredInv | StencilType::GradY => self.apply_grad(&scratch, array, StencilType::GradY, difference_type),
             _ => array.clone_from(&scratch),
         };
     }
