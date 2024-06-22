@@ -189,15 +189,16 @@ impl FieldConfiguration {
                     continue;
                 }
                 let (i,j) = charge.get_location_on_grid(&self.geometry);
-                grid[[i, j]] += charge.charge * self.charge_normalization; // CIC charge 
+                self.stencils.add_softened_point(grid, i, j, charge.charge * self.charge_normalization);
+                // grid[[i, j]] += charge.charge * self.charge_normalization; // CIC charge 
             }
 
-            self.stencils.apply(grid, stencil::StencilType::Soften, stencil::DifferenceType::Central);
+            //self.stencils.apply(grid, stencil::StencilType::Soften, stencil::DifferenceType::Central);
         }
     }
 
     pub fn initialize_on_constraints(&mut self) {
-        self.ensure_cic_grid();
+        self.make_cic_grid();
 
         let mut Ey: Array2<f64> = self.cic_grid.as_ref().unwrap().clone();
         let mut Ex = Ey.clone();
@@ -216,20 +217,34 @@ impl FieldConfiguration {
         
     }
 
-    pub fn ensure_cic_grid(&mut self) {
-        if self.cic_grid.is_none() {
-            self.make_cic_grid();
-        }
-    }
 
     pub fn ensure_initialized(&mut self) {
+        // Basic case: initialize if we have no fields yet
         if self.Ey_grid.is_none() {
+            self.initialize_on_constraints();
+        }
+
+        // During dynamic evolution, the total number of charges must remain constant and the strength of each charge must remain constant.
+        // Otherwise Maxwell's constraint equations are violated; we therefore need to reinitialize the fields.
+
+        let mut constraint_violation = false;
+
+        if self.charges_at_last_tick.len() != self.charges.len() {
+            constraint_violation = true;
+        }
+        
+        for (charge_earlier, charge_now) in self.charges_at_last_tick.iter().zip(self.charges.iter()) {
+            if charge_earlier.charge != charge_now.charge {
+                constraint_violation = true;                
+            }
+        }
+
+        if constraint_violation {
             self.initialize_on_constraints();
         }
     }
 
     pub fn evaluate_cic_grid_interpolated(&mut self, x: f64, y: f64) -> f64 {
-        self.ensure_cic_grid();
         evaluate_grid_interpolated_or_0(self, &self.cic_grid, x, y)
     }
 
@@ -283,17 +298,13 @@ impl FieldConfiguration {
             // than anything fancier than that.
 
             for i in i_min..i_max {
-                jx[[i, j_earlier]] = x_current_density;
+                self.stencils.add_softened_point(jx, i, j_earlier, x_current_density);
             }
 
             for j in j_min..j_max {
-                jy[[i_now, j]] = y_current_density;
+                self.stencils.add_softened_point(jy, i_now, j, y_current_density);
             }
             
-            // Now apply the stencils to smooth the current density field, in just the same way as the charge density field is smoothed
-            self.stencils.apply(jx, stencil::StencilType::Soften, stencil::DifferenceType::Central);
-            self.stencils.apply(jy, stencil::StencilType::Soften, stencil::DifferenceType::Central);
-
 
         }
         

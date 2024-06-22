@@ -21,7 +21,7 @@ export async function main() {
     let draggingOffsetX = 0;
     let draggingOffsetY = 0;
 
-    let cic_resolution = 300;
+    let cic_resolution = 256;
 
     const dpr = window.devicePixelRatio || 1;
 
@@ -69,14 +69,30 @@ export async function main() {
 
     updateSolverType();
 
+    let animation_request_id = null;
+
     document.getElementById('solver').addEventListener('change', () => {
+        if(animation_request_id!==null)
+            window.cancelAnimationFrame(animation_request_id);
+        animation_request_id = null;
         updateSolverType();
         drawVectorField();
+        if(dynamic)
+            animation_request_id = window.requestAnimationFrame(tickField);
     });
 
     function tickField() {
-        field.tick(0.5);
+        animation_request_id = null;
+        for(let i = 0; i < 4; i++)
+            field.tick(0.5);
+        // tick the field forward 4 times for every redraw
+        // The 0.5 value above indicates that delta_t = 0.5c/delta_x, to satisfy the CFL stability condition
+        // note this means the user-experienced speed of light depends on delta_x, which in turn depends
+        // on the number of cic cells. 
+        // TODO: currently the refresh rate will therefore change the presented speed of light!!
         drawVectorField();
+        if(dynamic)
+            animation_request_id = window.requestAnimationFrame(tickField);
 
     }
 
@@ -100,9 +116,6 @@ export async function main() {
 
         drawChargesOrCurrents();
 
-
-        if(dynamic)
-            setTimeout(tickField, 20); // Redraw the field after 0.02 seconds
     }
 
     function updateChargeOrCurrentLabel(charge_or_current) {
@@ -374,15 +387,6 @@ export async function main() {
             draggingOffsetY = event.offsetY - draggingCharge.y;
             originalChargeX = draggingCharge.x;
             originalChargeY = draggingCharge.y;
-        }
-    });
-
-    canvas.addEventListener('mousemove', (event) => {
-        if (draggingCharge) {
-            draggingCharge.x = event.offsetX - draggingOffsetX;
-            draggingCharge.y = event.offsetY - draggingOffsetY;
-            field.set_charges(charges);
-            drawVectorField();
         }
     });
 

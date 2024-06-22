@@ -1,5 +1,8 @@
+use std::array;
+
 use ndarray::{Array2};
 use num_complex::Complex;
+use web_sys::console::log;
 use crate::fourier;
 
 pub struct Stencils {
@@ -9,6 +12,9 @@ pub struct Stencils {
     size_y: f64,
     nx: usize,
     ny: usize,
+    soften_norm: f64,
+    soften_sigma_x: f64,
+    soften_sigma_y: f64,
 
 }
 
@@ -29,7 +35,7 @@ pub enum DifferenceType {
 
 impl Stencils {
     pub fn new(size_x: f64, size_y: f64, nx: usize, ny: usize) -> Stencils {
-        let mut s = Stencils { del_squared_inv: None, soften: None, size_x, size_y, nx, ny};
+        let mut s = Stencils { del_squared_inv: None, soften: None, size_x, size_y, nx, ny, soften_norm: 0.0, soften_sigma_x: 0.0, soften_sigma_y: 0.0};
         s.init_inv_laplacian();
         s.init_soften();
         s
@@ -45,10 +51,13 @@ impl Stencils {
     }
 
     fn init_soften(&mut self) {
-        let mut soften = self.make_soften_stencil();
+        self.soften_sigma_x = 0.01 * self.size_x;
+        self.soften_sigma_y = 0.01 * self.size_y;
+        let (mut soften, soften_norm) = self.make_soften_stencil();
         fourier::array_fft(&mut soften);
         fourier::array_fft_renormalise(&mut soften);
         self.soften = Some(soften);
+        self.soften_norm = soften_norm;
     }
 
     fn apply_fourier_stencil(&self, array: &mut Array2<f64>, fourier_stencil: &Array2<Complex<f64>>) {
@@ -90,14 +99,59 @@ impl Stencils {
         result
     }
 
-    pub fn make_soften_stencil(&self) -> Array2<Complex<f64>> {
+    pub fn add_softened_point(&self, array: &mut Array2<f64>, i_cen: usize, j_cen: usize, value: f64) {
+        // While originally I used CIC assignment of charges/currents and then used a FFT convolution algorithm, since
+        // the number of charges is much less than log N^2, it's actually far more efficient to directly convolve in
+        // real space
+        let dx = self.size_x / self.nx as f64;
+        let dy = self.size_y / self.ny as f64;
+
+        let sigma_x = self.soften_sigma_x;
+        let sigma_y = self.soften_sigma_y;
+
+        let mut norm: f64 = 0.0; 
+
+        let i_cen_signed = i_cen as isize;
+        let j_cen_signed = j_cen as isize;
+
+        let max_offset_x = (4.0*sigma_x / dx) as isize;
+        let max_offset_y = (4.0*sigma_y / dy) as isize;
+
+        for i_offset in -max_offset_x..max_offset_x+1 {
+            for j_offset in -max_offset_y..max_offset_y+1 {
+                let x = i_offset as f64*dx;
+                let y = j_offset as f64*dy;
+                let exponent = -((x * x) / (2.0 * sigma_x * sigma_x) + (y * y) / (2.0 * sigma_y * sigma_y));
+
+                let mut i = i_cen_signed + i_offset;
+                let mut j = j_cen_signed + j_offset;
+
+                if i < 0 {
+                    i += self.nx as isize;
+                } else if i >= self.nx as isize {
+                    i -= self.nx as isize;
+                }
+
+                if j < 0 {
+                    j += self.ny as isize;
+                } else if j >= self.ny as isize {
+                    j -= self.ny as isize;
+                }
+
+                array[[i as usize, j as usize]] += value * exponent.exp()/self.soften_norm;
+            }
+        }
+
+    }
+
+    pub fn make_soften_stencil(&self) -> (Array2<Complex<f64>>, f64) {
         let mut result = Array2::<Complex<f64>>::zeros((self.nx, self.ny));
         
         let dx = self.size_x / self.nx as f64;
         let dy = self.size_y / self.ny as f64;
 
-        let sigma_x = 0.01 * self.size_x;
-        let sigma_y = 0.01 * self.size_y;
+        let sigma_x = self.soften_sigma_x;
+        let sigma_y = self.soften_sigma_y;
 
         // Instead of analytically computing the gaussian norm, we compute it numerically so that
         // aliasing errors are taken into account
@@ -123,7 +177,7 @@ impl Stencils {
 
         result /=norm;
         
-        result
+        (result, norm.norm())
     }
 
     pub fn apply_grad(&self, array: & Array2<f64>, result: &mut Array2<f64>, stencil_type: StencilType, difference_type: DifferenceType) {
