@@ -25,8 +25,14 @@ export async function main() {
 
     const dpr = window.devicePixelRatio || 1;
 
+    // make the DOM element smaller if it's exceeding the width of the device
+    canvas.style.width = '90%';
+    canvas.style.height = '90%';
+
     // Store the original CSS dimensions.
     const rect = canvas.getBoundingClientRect();
+
+    console.log(rect.width, rect.height);
 
     // Give the canvas pixel dimensions of their CSS
     // size * the device pixel ratio.
@@ -252,8 +258,8 @@ export async function main() {
         chargeProperties.style.display = 'block';
         chargeProperties.style.position = 'absolute';
         const canvasRect = canvas.getBoundingClientRect();
-        const pageOffsetTop = window.pageYOffset || document.documentElement.scrollTop || document.body.scrollTop || 0;
-        const pageOffsetLeft = window.pageXOffset || document.documentElement.scrollLeft || document.body.scrollLeft || 0;
+        const pageOffsetTop = window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
+        const pageOffsetLeft = window.scrollX || document.documentElement.scrollLeft || document.body.scrollLeft || 0;
         const canvasRectTop = canvasRect.top + pageOffsetTop;
         const canvasRectLeft = canvasRect.left + pageOffsetLeft;
         chargeProperties.style.top = `${canvasRectTop + charge.y - chargeProperties.offsetHeight / 2}px`;
@@ -267,7 +273,13 @@ export async function main() {
             chargeProperties.style.left = `${canvasRectLeft + charge.x + 20}px`;
             chargeProperties.classList.add('point-left');
             chargeProperties.classList.remove('point-right');
-            
+        }
+        // if the chargeProperties div is off the screen, move it back on
+        if (chargeProperties.offsetLeft < 0) {
+            chargeProperties.style.left = '0';
+        }
+        if (chargeProperties.offsetLeft + chargeProperties.offsetWidth > window.innerWidth) {
+            chargeProperties.style.left = `${window.innerWidth - chargeProperties.offsetWidth}px`;
         }
         chargeProperties.style.zIndex = '1';
 
@@ -379,38 +391,83 @@ export async function main() {
     let originalChargeX = 0;
     let originalChargeY = 0;
 
+
+    function coordinatesFromMouseOrTouch(event) {
+        if (event.touches) {
+            const touch = event.touches[0];
+            return { offsetX: touch.pageX - canvas.offsetLeft, offsetY: touch.pageY - canvas.offsetTop };
+        } else {
+            return { offsetX: event.offsetX, offsetY: event.offsetY };
+        }
+    }
+
     function getChargeFromEvent(event) {
-        const { offsetX, offsetY } = event;
+        const { offsetX, offsetY } = coordinatesFromMouseOrTouch(event);
+        let allowRadius = 10;
+        if (event.touches) {
+            allowRadius = event.touches[0].radiusX + 10;
+        } 
         for (let i = charges.length - 1; i >= 0; i--) {
             // go in reverse order so that the charge on top is selected first
             const charge = charges[i];
             const dx = offsetX - charge.x;
             const dy = offsetY - charge.y;
-            if (Math.sqrt(dx * dx + dy * dy) < 10) {
+            if (Math.sqrt(dx * dx + dy * dy) < allowRadius) {
                 return charge;
             }
         }
         return null;
     }
 
-    canvas.addEventListener('mousedown', (event) => {
+    function mouseOrTouchDown(event) {
+        console.log(event);
         deselectCharge();
         draggingCharge = getChargeFromEvent(event);
+        console.log("dragging charge", draggingCharge);
         if (draggingCharge) {
-            draggingOffsetX = event.offsetX - draggingCharge.x;
-            draggingOffsetY = event.offsetY - draggingCharge.y;
+            event.preventDefault();
+            const { offsetX, offsetY } = coordinatesFromMouseOrTouch(event);
+            draggingOffsetX = offsetX - draggingCharge.x;
+            draggingOffsetY = offsetY - draggingCharge.y;
             originalChargeX = draggingCharge.x;
             originalChargeY = draggingCharge.y;
         }
-    });
+        return false;
+    }
 
-    canvas.addEventListener('mouseup', () => {
+    function mouseOrTouchUp(event) {
         if (!draggingCharge) return;
+        event.preventDefault();
         if (!(Math.abs(originalChargeX - draggingCharge.x) > 3 || Math.abs(originalChargeY - draggingCharge.y) > 3)) {
             selectCharge(draggingCharge);
         }
         draggingCharge = null;
-    });
+    }
+
+    function mouseOrTouchMove(event) {
+        const { offsetX, offsetY } = coordinatesFromMouseOrTouch(event);
+        if (draggingCharge) {
+            event.preventDefault();
+            draggingCharge.x = offsetX - draggingOffsetX;
+            draggingCharge.y = offsetY - draggingOffsetY;
+            if(!dynamic)    
+                drawVectorField();
+        }
+    }
+
+    function mouseLeaveOrTouchCancel(event) {
+        draggingCharge = null;
+    }
+
+    canvas.addEventListener('mousedown', mouseOrTouchDown);
+    canvas.addEventListener('mouseup', mouseOrTouchUp);
+    canvas.addEventListener('mousemove', mouseOrTouchMove);
+    canvas.addEventListener('mouseleave', mouseLeaveOrTouchCancel);
+
+    canvas.addEventListener('touchstart', mouseOrTouchDown);
+    canvas.addEventListener('touchend', mouseOrTouchUp);
+    canvas.addEventListener('touchmove', mouseOrTouchMove);
+    canvas.addEventListener('touchcancel', mouseLeaveOrTouchCancel);
 
     canvas.addEventListener('dblclick', (event) => {
         let existingCharge = getChargeFromEvent(event);
@@ -422,30 +479,7 @@ export async function main() {
             addCharge(offsetX, offsetY, 1);
             selectCharge(charges[charges.length - 1]);
         }
-    });
-
-    canvas.addEventListener('mousemove', (event) => {
-        if (draggingCharge) {
-            draggingCharge.x = event.offsetX - draggingOffsetX;
-            draggingCharge.y = event.offsetY - draggingOffsetY;
-            if(!dynamic)    
-                drawVectorField();
-        }
-    });
-
-    canvas.addEventListener('mouseup', () => {
-        if(draggingCharge===null) return;
-        if(!(Math.abs(originalChargeX - draggingCharge.x) > 3 || Math.abs(originalChargeY - draggingCharge.y) > 3)) {           
-            selectCharge(draggingCharge);
-        }
-
-        draggingCharge = null;
-    });
-
-
-
-    canvas.addEventListener('mouseleave', () => {
-        draggingCharge = null;
+        return false;
     });
 
     addPositiveChargeBtn.addEventListener('click', () => {
