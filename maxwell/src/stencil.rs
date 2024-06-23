@@ -4,14 +4,12 @@ use ndarray::{Array2};
 use num_complex::Complex;
 use web_sys::console::log;
 use crate::fourier;
+use crate::Geometry;
 
 pub struct Stencils {
     pub del_squared_inv: Option<Array2<Complex<f64>>>,
     pub soften: Option<Array2<Complex<f64>>>,
-    size_x: f64,
-    size_y: f64,
-    nx: usize,
-    ny: usize,
+    geometry: Geometry,
     soften_norm: f64,
     soften_sigma_x: f64,
     soften_sigma_y: f64,
@@ -34,8 +32,8 @@ pub enum DifferenceType {
 }
 
 impl Stencils {
-    pub fn new(size_x: f64, size_y: f64, nx: usize, ny: usize) -> Stencils {
-        let mut s = Stencils { del_squared_inv: None, soften: None, size_x, size_y, nx, ny, soften_norm: 0.0, soften_sigma_x: 0.0, soften_sigma_y: 0.0};
+    pub fn new(geometry: Geometry) -> Stencils {
+        let mut s = Stencils { del_squared_inv: None, soften: None, geometry, soften_norm: 0.0, soften_sigma_x: 0.0, soften_sigma_y: 0.0};
         s.init_inv_laplacian();
         s.init_soften();
         s
@@ -51,8 +49,8 @@ impl Stencils {
     }
 
     fn init_soften(&mut self) {
-        self.soften_sigma_x = 0.01 * self.size_x;
-        self.soften_sigma_y = 0.01 * self.size_y;
+        self.soften_sigma_x = 2.0 * self.geometry.delta_x();
+        self.soften_sigma_y = 2.0 * self.geometry.delta_y();
         let (mut soften, soften_norm) = self.make_soften_stencil();
         fourier::array_fft(&mut soften);
         fourier::array_fft_renormalise(&mut soften);
@@ -82,18 +80,18 @@ impl Stencils {
     }
 
     pub fn make_laplacian_stencil(&self) -> Array2<Complex<f64>> {
-        let mut result = Array2::<Complex<f64>>::zeros((self.nx, self.ny));
-        let dx = self.size_x / self.nx as f64;
-        let dy = self.size_y / self.ny as f64;
+        let mut result = Array2::<Complex<f64>>::zeros((self.geometry.nx, self.geometry.ny));
+        let dx = self.geometry.delta_x();
+        let dy = self.geometry.delta_y();
 
         let dx2_inv = Complex::new(1./(dx*dx), 0.0);
         let dy2_inv = Complex::new(1./(dy*dy), 0.0);
 
         
         result[[0,0]] = -2.0*dx2_inv + -2.0*dy2_inv;
-        result[[self.nx-1,0]] = dx2_inv;
+        result[[self.geometry.nx-1,0]] = dx2_inv;
         result[[1,0]] = dx2_inv;
-        result[[0,self.ny-1]] = dy2_inv;
+        result[[0,self.geometry.ny-1]] = dy2_inv;
         result[[0,1]] = dy2_inv;
 
         result
@@ -103,8 +101,8 @@ impl Stencils {
         // While originally I used CIC assignment of charges/currents and then used a FFT convolution algorithm, since
         // the number of charges is much less than log N^2, it's actually far more efficient to directly convolve in
         // real space
-        let dx = self.size_x / self.nx as f64;
-        let dy = self.size_y / self.ny as f64;
+        let dx = self.geometry.delta_x();
+        let dy = self.geometry.delta_y();
 
         let sigma_x = self.soften_sigma_x;
         let sigma_y = self.soften_sigma_y;
@@ -127,15 +125,15 @@ impl Stencils {
                 let mut j = j_cen_signed + j_offset;
 
                 if i < 0 {
-                    i += self.nx as isize;
-                } else if i >= self.nx as isize {
-                    i -= self.nx as isize;
+                    i += self.geometry.nx as isize;
+                } else if i >= self.geometry.nx as isize {
+                    i -= self.geometry.nx as isize;
                 }
 
                 if j < 0 {
-                    j += self.ny as isize;
-                } else if j >= self.ny as isize {
-                    j -= self.ny as isize;
+                    j += self.geometry.ny as isize;
+                } else if j >= self.geometry.ny as isize {
+                    j -= self.geometry.ny as isize;
                 }
 
                 array[[i as usize, j as usize]] += value * exponent.exp()/self.soften_norm;
@@ -145,10 +143,10 @@ impl Stencils {
     }
 
     pub fn make_soften_stencil(&self) -> (Array2<Complex<f64>>, f64) {
-        let mut result = Array2::<Complex<f64>>::zeros((self.nx, self.ny));
+        let mut result = Array2::<Complex<f64>>::zeros((self.geometry.nx, self.geometry.ny));
         
-        let dx = self.size_x / self.nx as f64;
-        let dy = self.size_y / self.ny as f64;
+        let dx = self.geometry.delta_x();
+        let dy = self.geometry.delta_y();
 
         let sigma_x = self.soften_sigma_x;
         let sigma_y = self.soften_sigma_y;
@@ -157,17 +155,18 @@ impl Stencils {
         // aliasing errors are taken into account
         let mut norm: Complex<f64> = Complex::new(0.0, 0.0); 
 
-        // result[[0,0]] = Complex::new(1.0, 0.0);
- 
-        for i in 0..self.nx {
-            for j in 0..self.ny {
+        let x_extent_including_boundary = self.geometry.x_extent_including_boundary();
+        let y_extent_including_boundary = self.geometry.y_extent_including_boundary();
+
+        for i in 0..self.geometry.nx {
+            for j in 0..self.geometry.ny {
                 let mut x = i as f64*dx;
                 let mut y = j as f64*dy;
-                if x > self.size_x/2.0 {
-                    x = self.size_x - x;
+                if x > x_extent_including_boundary/2.0 {
+                    x = x_extent_including_boundary - x;
                 }
-                if y > self.size_y/2.0 {
-                    y = self.size_y - y;
+                if y > y_extent_including_boundary/2.0 {
+                    y = y_extent_including_boundary - y;
                 }
                 let exponent = -((x * x) / (2.0 * sigma_x * sigma_x) + (y * y) / (2.0 * sigma_y * sigma_y));
                 result[[i, j]] = Complex::new( exponent.exp(), 0.0);
@@ -181,18 +180,18 @@ impl Stencils {
     }
 
     pub fn apply_grad(&self, array: & Array2<f64>, result: &mut Array2<f64>, stencil_type: StencilType, difference_type: DifferenceType) {
-        for i in 0..self.nx {
-            for j in 0..self.ny {
+        for i in 0..self.geometry.nx {
+            for j in 0..self.geometry.ny {
                 result[[i,j]] = self.evaluate(array, i, j, &stencil_type, &difference_type);
             }
         }
     }
 
     pub fn evaluate(&self, array: &Array2<f64>, i: usize, j: usize, stencil_type: &StencilType, difference_type: &DifferenceType) -> f64 {
-        let dx = self.size_x / self.nx as f64;
+        let dx = self.geometry.delta_x();
         let dx_inv = 1.0/dx;
         let dx_inv_by_2 = 0.5/dx;
-        let dy = self.size_y / self.ny as f64;
+        let dy = self.geometry.delta_y();
         let dy_inv = 1.0/dy;
         let dy_inv_by_2 = 0.5/(dy);
         let nx = array.dim().0;

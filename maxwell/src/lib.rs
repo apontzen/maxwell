@@ -35,8 +35,7 @@ impl Charge {
 
 impl Charge {
     pub fn get_location_on_grid(&self, geometry: &Geometry) -> (usize, usize) {
-        let i = (self.x / geometry.x_max * geometry.nx as f64) as usize;
-        let j = (self.y / geometry.y_max * geometry.ny as f64) as usize;
+        let (i,j) = geometry.position_to_cell(self.x, self.y).unwrap();
         (i, j)
     }
 }
@@ -49,21 +48,59 @@ impl Debug for Charge {
 }
 
 
+#[derive(Clone)]
 pub struct Geometry {
-    x_max: f64,
-    y_max: f64,
-    nx: usize,
-    ny: usize,
+    /// maximum x extent of the physical region. Physical region runs from 0 to x_max; boundary cells extend further.
+    x_max: f64, 
+    /// maximum y extent of the physical region. Physical region runs from 0 to y_max; boundary cells extend further.
+    y_max: f64, 
+    /// number of grid cells in x direction, including boundary cells (=2*nboundary)
+    nx: usize, 
+    /// number of grid cells in y direction, including boundary cells (=2*nboundary)
+    ny: usize, 
+    /// number of boundary cells on each side
+    nboundary: usize, 
 }
 
 impl Geometry {
     fn delta_x(&self) -> f64 {
-        self.x_max / self.nx as f64
+        self.x_max / (self.nx - 2 * self.nboundary) as f64
     }
 
     fn delta_y(&self) -> f64 {
-        self.y_max / self.ny as f64
+        self.y_max / (self.ny - 2 * self.nboundary) as f64
     }
+
+    fn position_to_cell(&self, x: f64, y: f64) -> Option<(usize, usize)> {
+        let i = (x / self.x_max * (self.nx - 2*self.nboundary) as f64) as isize + self.nboundary as isize;
+        let j = (y / self.y_max * (self.ny - 2*self.nboundary) as f64) as isize + self.nboundary as isize;
+        if i < 0 || i >= self.nx as isize || j < 0 || j >= self.ny as isize {
+            None
+        } else {
+            Some((i as usize, j as usize))
+        }
+    }
+
+    fn position_to_cell_unclamped(&self, x: f64, y: f64) -> (isize, isize) {
+        let i = (x / self.x_max * (self.nx - 2*self.nboundary) as f64) as isize + self.nboundary as isize;
+        let j = (y / self.y_max * (self.ny - 2*self.nboundary) as f64) as isize + self.nboundary as isize;
+        (i, j)
+    }
+
+    fn cell_to_centroid(&self, i: usize, j: usize) -> (f64, f64) {
+        let x = (i as f64 - self.nboundary as f64 + 0.5) * self.delta_x();
+        let y = (j as f64 - self.nboundary as f64 + 0.5) * self.delta_y();
+        (x, y)
+    }
+
+    fn x_extent_including_boundary(&self) -> f64 {
+        self.x_max * self.nx as f64 / (self.nx - 2*self.nboundary) as f64
+    }
+
+    fn y_extent_including_boundary(&self) -> f64 {
+        self.y_max * self.ny as f64 / (self.ny - 2*self.nboundary) as f64
+    }
+
 }
 
 #[wasm_bindgen]
@@ -82,10 +119,10 @@ pub struct FieldConfiguration {
     charge_normalization: f64,
 }
 
-pub fn evaluate_grid(field: &Array2<f64>, x: i32, y: i32) -> f64 {
+pub fn evaluate_grid(field: &Array2<f64>, x: isize, y: isize) -> f64 {
     // Evaluate the field at the specified grid cell, or return 0 if x>=nx, y>=ny, x<0 or y<0
-    let nx = field.shape()[0] as i32;
-    let ny = field.shape()[1] as i32;
+    let nx = field.shape()[0] as isize;
+    let ny = field.shape()[1] as isize;
     if x < 0 || x >= nx || y < 0 || y >= ny {
         return 0.0;
     }
@@ -104,8 +141,8 @@ pub fn evaluate_grid_interpolated(field_config: &FieldConfiguration, grid: &Arra
     let nx = grid.shape()[0];
     let ny = grid.shape()[1];
 
-    let dx = field_config.geometry.x_max / nx as f64;
-    let dy = field_config.geometry.y_max / ny as f64;
+    let dx = field_config.geometry.delta_x();
+    let dy = field_config.geometry.delta_y();
 
     assert!(nx == field_config.geometry.nx && ny == field_config.geometry.ny, "Grid size mismatch");
 
@@ -117,12 +154,8 @@ pub fn evaluate_grid_interpolated(field_config: &FieldConfiguration, grid: &Arra
         return 0.0;
     }
 
-    let i0: i32 = (x / field_config.geometry.x_max * nx as f64) as i32;
-    let j0: i32 = (y / field_config.geometry.y_max * ny as f64) as i32;
-
-    // work out centre of the cell we just landed in
-    let x0 = (i0 as f64 + 0.5) * field_config.geometry.x_max / nx as f64;
-    let y0 = (j0 as f64 + 0.5) * field_config.geometry.y_max / ny as f64;
+    let (i0, j0) = field_config.geometry.position_to_cell_unclamped(x, y);
+    let (x0, y0) = field_config.geometry.cell_to_centroid(i0 as usize, j0 as usize);
 
     // if x>x0, we interpolate between i and i+1; if x<x0, we interpolate between i-1 and i
     let i1 = if x > x0 { i0 + 1 } else { i0 - 1 };
@@ -150,12 +183,13 @@ pub fn evaluate_grid_interpolated(field_config: &FieldConfiguration, grid: &Arra
 impl FieldConfiguration {
     #[wasm_bindgen(constructor)]
     pub fn new(x_max: f64, y_max: f64, nx: usize, ny: usize) -> FieldConfiguration {
-        let cell_area = x_max * y_max / (nx * ny) as f64;
+        let geometry = Geometry{x_max: x_max, y_max: y_max, nx: nx, ny: ny, nboundary: nx/8};
+        let geometry_clone = geometry.clone();
+        let cell_area = geometry.delta_x() * geometry.delta_y();
         let charge_normalization = 4000.0 / cell_area;
-        FieldConfiguration { charges: vec![], charges_at_last_tick: vec![], 
-            geometry: Geometry{x_max: x_max, y_max: y_max, nx: nx, ny: ny}, 
+        FieldConfiguration { charges: vec![], charges_at_last_tick: vec![], geometry, 
             cic_grid: None, Ex_grid: None, Ey_grid: None, Bz_grid: None, Bz_integral_grid: None, jx_grid: None, jy_grid: None,
-            stencils: stencil::Stencils::new(x_max, y_max, nx, ny), charge_normalization }
+            stencils: stencil::Stencils::new(geometry_clone), charge_normalization }
     }
 
     pub fn set_charges(&mut self, charges: JsValue) {
@@ -190,10 +224,7 @@ impl FieldConfiguration {
                 }
                 let (i,j) = charge.get_location_on_grid(&self.geometry);
                 self.stencils.add_softened_point(grid, i, j, charge.charge * self.charge_normalization);
-                // grid[[i, j]] += charge.charge * self.charge_normalization; // CIC charge 
             }
-
-            //self.stencils.apply(grid, stencil::StencilType::Soften, stencil::DifferenceType::Central);
         }
     }
 

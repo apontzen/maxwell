@@ -33,6 +33,5 @@ impl Iterator for PmlIterator {
 }
 
 pub fn pml_iterator_from_geometry(geometry: &Geometry) -> PmlIterator {
-    let layer_width = geometry.nx/8;
-    PmlIterator { i: 0, j: 0, nx: geometry.nx, ny: geometry.ny, layer_width }
+    PmlIterator { i: 0, j: 0, nx: geometry.nx, ny: geometry.ny, layer_width: geometry.nboundary }
 }
