@@ -342,15 +342,18 @@ impl FieldConfiguration {
 
     }
     
+    /// Evolve the fields by one timestep
     pub fn tick(&mut self, delta_t: f64) {
         self.ensure_initialized();
+
+        // compute the currents from any motion in the charges. 
         self.make_currents(delta_t);
+
+        // save the charges so we can compute the currents next time
         self.charges_at_last_tick = self.charges.clone();
 
-        // Evolve the fields by one timestep. Note that the B and density fields are half a tick behind and half a grid cell
-        // to the left of the E and j fields.
-
-        // Evolve Bz field first.
+        // Now we are ready to evolve the fields by one timestep. Note that the B and density 
+        // fields are half a tick behind and half a grid cell to the left of the E and j fields.
         let Ex = self.Ex_grid.as_mut().unwrap();
         let Ey = self.Ey_grid.as_mut().unwrap();
         let Bz = self.Bz_grid.as_mut().unwrap();
@@ -359,77 +362,58 @@ impl FieldConfiguration {
         let jy = self.jy_grid.as_ref().unwrap();
 
 
-        // add PML damping to the Bz field
+        // Evolve Bz field first, to get it from half a tick behind to half a tick ahead of the E field
         for (i, j, sigma_x, sigma_y) in pml::pml_iterator_from_geometry(&self.geometry) {
-            Bz[[i,j]] += (-(sigma_x+sigma_y) * Bz[[i, j]])*delta_t; // + sigma_x*sigma_y * Bz_integral[[i,j]]) * delta_t;
+            
+            let d_Ex_dy = self.stencils.evaluate(&Ex, i, j, &stencil::StencilType::GradY, &stencil::DifferenceType::Forward);
+            let d_Ey_dx = self.stencils.evaluate(&Ey, i, j, &stencil::StencilType::GradX, &stencil::DifferenceType::Forward);
+
+            // dB_z/dt = -dE_x/dy + dE_y/dx
+            Bz[[i,j]] += (d_Ex_dy - d_Ey_dx) * delta_t;
+            
+            // Now add the PML damping terms. This is a non-physical term that damps the fields near the boundary to 
+            // mimic vacuum BCs. This is explained in the following sources:
+            //  * https://onlinelibrary.wiley.com/doi/book/10.1002/9781118646700, chapter 3 (not very clearly written, but
+            //    the equations are there)
+            //  * https://arxiv.org/abs/2108.05348 (this is nicely clear but not explicit for the EM case)
+
+            Bz[[i,j]] += (-(sigma_x+sigma_y) * Bz[[i, j]] - sigma_x*sigma_y * Bz_integral[[i,j]]) * delta_t;
+
+            // Finally update the integral of Bz over time (which is just used for the PML damping, not anything physical)
+            // Note that in tests I found neglecting the integral terms in the PML didn't make a huge difference to the
+            // level of reflections (just a qualitative observation, not a rigorous test). Without the integral terms,
+            // it's pretty obviously just a local damping term.
+            
+            Bz_integral[[i,j]] += Bz[[i,j]] * delta_t;
+            
+
+            
         }
 
-
-        let mut d_Ex_dy: Array2<f64> = self.stencils.apply_non_destructively(&Ex, stencil::StencilType::GradY, stencil::DifferenceType::Forward);
-        let mut d_Ey_dx: Array2<f64> = self.stencils.apply_non_destructively(&Ey, stencil::StencilType::GradX, stencil::DifferenceType::Forward);
-
-        d_Ex_dy *= delta_t;
-        d_Ey_dx *= delta_t;
-
-        (*Bz) += &d_Ex_dy;
-        (*Bz) -= &d_Ey_dx;
-
-        
-        *Bz_integral += &(Bz as &_ * delta_t);
-
-        
-
-
-        // evolve Ex and Ey fields
-        let mut d_Bz_dy = self.stencils.apply_non_destructively(&Bz, stencil::StencilType::GradY, stencil::DifferenceType::Backward);
-        let mut d_Bz_dx = self.stencils.apply_non_destructively(&Bz, stencil::StencilType::GradX, stencil::DifferenceType::Backward);
-
-
-        d_Bz_dy *= delta_t;
-        d_Bz_dx *= delta_t;
-
-        (*Ex) += &d_Bz_dy;
-        
-        (*Ey) -= &d_Bz_dx;
-
-        (*Ex) -= &(jx*delta_t);
-        (*Ey) -= &(jy*delta_t);
-
-        // add PML damping to the Ex and Ey fields
+        // Now the B field is half a tick ahead, so update the E field a tick to get ahead again
         for (i, j, sigma_x, sigma_y) in pml::pml_iterator_from_geometry(&self.geometry) {
-            let pml_x_term = -sigma_y * Ex[[i, j]]; // + sigma_x * self.stencils.evaluate(&Bz_integral, i, j, &stencil::StencilType::GradY, &stencil::DifferenceType::Backward);
-            let pml_y_term = -sigma_x * Ey[[i, j]]; //- sigma_y * self.stencils.evaluate(&Bz_integral, i, j, &stencil::StencilType::GradX, &stencil::DifferenceType::Backward) ;
+            let d_Bz_dy = self.stencils.evaluate(&Bz, i, j, &stencil::StencilType::GradY, &stencil::DifferenceType::Backward);
+            let d_Bz_dx = self.stencils.evaluate(&Bz, i, j, &stencil::StencilType::GradX, &stencil::DifferenceType::Backward);
+            Ex[[i,j]] += (d_Bz_dy - jx[[i,j]]) * delta_t;
+            Ey[[i,j]] += (-d_Bz_dx - jy[[i,j]]) * delta_t;
+            
+            // PML damping, as above:
+            let pml_x_term = -sigma_y * Ex[[i, j]] + sigma_x * self.stencils.evaluate(&Bz_integral, i, j, &stencil::StencilType::GradY, &stencil::DifferenceType::Backward);
+            let pml_y_term = -sigma_x * Ey[[i, j]] - sigma_y * self.stencils.evaluate(&Bz_integral, i, j, &stencil::StencilType::GradX, &stencil::DifferenceType::Backward) ;
             Ex[[i,j]] += pml_x_term*delta_t;
             Ey[[i,j]] += pml_y_term*delta_t;
         }
-
-        
-    
-        
 
     }
 }
 
 impl FieldConfiguration {
-    // For internal functions only
-
     pub fn evaluate_E_grid_interpolated(&mut self, x: f64, y: f64) -> (f64, f64) {
         self.ensure_initialized();
         let Ex = evaluate_grid_interpolated_or_0(self, &self.Ex_grid, x, y);
         let Ey = evaluate_grid_interpolated_or_0(self, &self.Ey_grid, x, y);
         (Ex, Ey)
     }
-
-    pub fn count_nans(name: &str, grid: &Array2<f64>) {
-        let mut nan_count = 0;
-        for element in grid.iter() {
-            if element.is_nan() || element.is_infinite() {
-                nan_count += 1;
-            }
-        }
-        web_sys::console::log_1(&format!("Number of NaN values in {}: {}", name, nan_count).into());
-    }
-
 }
 
 
@@ -464,7 +448,7 @@ pub fn compute_field_magnetostatic_direct(field_configuration: &FieldConfigurati
 }
 
 #[wasm_bindgen]
-pub fn compute_field_electrostatic_fourier(field_configuration: &mut FieldConfiguration, x: f64, y: f64) -> JsValue {
+pub fn compute_electric_field_dynamic(field_configuration: &mut FieldConfiguration, x: f64, y: f64) -> JsValue {
     let (u, v) = field_configuration.evaluate_E_grid_interpolated(x, y);
     to_value(&(u, v)).unwrap()
 }

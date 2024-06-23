@@ -1,5 +1,5 @@
 import init, { compute_field_electrostatic_direct, compute_field_magnetostatic_direct, 
-    compute_field_electrostatic_fourier, init_panic_hook, FieldConfiguration } from './maxwell/out/maxwell.js';
+    compute_electric_field_dynamic, init_panic_hook, FieldConfiguration } from './maxwell/out/maxwell.js';
 
 export async function main() {
     await init();
@@ -21,7 +21,7 @@ export async function main() {
     let draggingOffsetX = 0;
     let draggingOffsetY = 0;
 
-    let cic_resolution = 256;
+    let cic_resolution = 128;
 
     const dpr = window.devicePixelRatio || 1;
 
@@ -63,7 +63,7 @@ export async function main() {
             computeField = compute_field_electrostatic_direct;
         } else if (solverType === 'electrostatic_fourier' || solverType === 'dynamic') {
             updateChargeOrCurrentLabel('Charge');
-            computeField = compute_field_electrostatic_fourier;
+            computeField = compute_electric_field_dynamic;
         } else if (solverType === 'magnetostatic_direct') { 
             updateChargeOrCurrentLabel('Current');
             computeField = compute_field_magnetostatic_direct;
@@ -99,11 +99,16 @@ export async function main() {
             dt = time_now - last_time;
         }
 
+        dt /= 5; // convert from ms to internal time units
 
-        if(dt<10.0) {
-            field.tick(0.7*dt/10.0);
-        } else {
-            field.tick(0.7);
+        // Try to get forward in time by dt, but abandon if it takes too long (more than 20ms)
+        const performance_time_start = performance.now();
+        const max_time_ms = 20.0;
+
+        while (dt > 0.0 && performance.now() - performance_time_start < max_time_ms) {
+            const step = Math.min(0.5, dt);
+            field.tick(step);
+            dt -= step;
         }
  
         last_time = time_now;
@@ -150,8 +155,8 @@ export async function main() {
         const vectors = [];
         const step = 20;
 
-        for (let x = 0; x < rect.width; x += step) {
-            for (let y = 0; y < rect.height; y += step) {
+        for (let x = step; x < rect.width; x += step) {
+            for (let y = step; y < rect.height; y += step) {
                 // exclude the vector if it's within step distance from any charge
                 if (charges.some(charge => {
                     const dx = x - charge.x;
