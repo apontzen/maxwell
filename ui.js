@@ -1,6 +1,25 @@
 import init, { compute_field_electrostatic_direct, compute_field_magnetostatic_direct, 
     compute_electric_field_dynamic, init_panic_hook, FieldConfiguration } from './maxwell/out/maxwell.js';
 
+import { drawfieldlinePlot } from './fieldline.js';
+
+export const chargeSize = 10;
+
+export function getChargeFromPoint(charges, x, y, allowRadius) {
+    if (allowRadius == null) 
+        allowRadius = chargeSize;
+    for (let i = charges.length - 1; i >= 0; i--) {
+        // go in reverse order so that the charge on top is selected first
+        const charge = charges[i];
+        const dx = x - charge.x;
+        const dy = y - charge.y;
+        if (Math.sqrt(dx * dx + dy * dy) < allowRadius) {
+            return charge;
+        }
+    }
+    return null;
+}
+
 export async function main() {
     await init();
 
@@ -9,11 +28,11 @@ export async function main() {
 
     const canvas = document.getElementById('vectorFieldCanvas');
     const ctx = canvas.getContext('2d');
-    const plotTypeSelect = document.getElementById('plotType');
     const addPositiveChargeBtn = document.getElementById('addPositiveCharge');
     const addNegativeChargeBtn = document.getElementById('addNegativeCharge');
+    // const fieldStrength = document.getElementById('fieldStrength');
 
-    const chargeSize = 10;
+    
     const maxArrowLength = 40;
 
     let charges = [];
@@ -28,7 +47,9 @@ export async function main() {
     // make the DOM element smaller if it's exceeding the width of the device
     canvas.style.width = '90%';
     canvas.style.height = '90%';
-
+    canvas.style.maxWidth = '800px';
+    canvas.style.maxHeight = '600px';
+    
     // Store the original CSS dimensions.
     const rect = canvas.getBoundingClientRect();
 
@@ -52,14 +73,20 @@ export async function main() {
 
     let dynamic = false;
     
+    let plotType = 'quiver';
+
     function updateSolverType() {
         // get value of solver
         const solverType = document.getElementById('solver').value;
         
         dynamic = solverType === 'dynamic';
 
-        if (solverType === 'electrostatic_direct') {
+        plotType = 'quiver';
+
+        if (solverType === 'electrostatic_direct' || solverType === 'electrostatic_direct_fieldline') {
             updateChargeOrCurrentLabel('Charge');
+            if(solverType === 'electrostatic_direct_fieldline')
+                plotType = 'fieldline';
             computeField = compute_field_electrostatic_direct;
         } else if (solverType === 'electrostatic_fourier' || solverType === 'dynamic') {
             updateChargeOrCurrentLabel('Charge');
@@ -122,7 +149,6 @@ export async function main() {
     }
 
     function drawVectorField() {
-        const plotType = plotTypeSelect.value;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
         field.set_charges(charges);
@@ -135,8 +161,8 @@ export async function main() {
         
         if (plotType === 'quiver') {
             drawQuiverPlot(vectors);
-        } else if (plotType === 'streamline') {
-            drawStreamlinePlot();
+        } else if (plotType === 'fieldline') {
+            drawfieldlinePlot(charges, field, ctx, rect, chargeSize);
         }
 
         drawChargesOrCurrents();
@@ -177,147 +203,6 @@ export async function main() {
         });
     }
 
-    class StreamDepartures {
-        constructor(num_departures, starting_angle = 0) {
-            this.num_departures = num_departures;
-            this.departures = Array.from(
-                { length: this.num_departures }, 
-                (_, i) => 
-                 (starting_angle + (2 * Math.PI * (i+0.5)) / this.num_departures)%(2*Math.PI));
-        }
-
-        get_new_departure() {
-            if (this.departures.length === 0) return null;
-            let departures_val = this.departures.shift();
-            console.log("Removed departure", departures_val, "from", this.departures);
-            return departures_val;
-        }
-
-        add_departure(angle) {
-            // find the closest existing angle in the departures list and remove it
-            let min_diff = 2 * Math.PI;
-            let min_diff_index = null;
-            for (let i = 0; i < this.departures.length; i++) {
-                let diff = Math.abs(angle - this.departures[i]);
-                if (diff > Math.PI) {
-                    diff = 2 * Math.PI - diff;
-                }
-                if (diff < min_diff) {
-                    min_diff = diff;
-                    min_diff_index = i;
-                }
-            }
-            if (min_diff_index !== null) {
-                this.departures.splice(min_diff_index, 1);
-                console.log("Removed departure", angle, "from", this.departures);
-            }
-
-        }
-
-        
-    }
-    
-    function streamlineStartingAngles() {
-        // circle around the charge and measure the strength of the EM field
-        const numCharges = charges.length;
-        if (numCharges === 1) {
-            charges[0].angle = 0;
-        } else if (numCharges > 1) {
-            for (let i = 0; i < numCharges; i++) {
-                const currentCharge = charges[i];
-                const nextCharge = charges[(i + 1) % numCharges];
-                const dx = nextCharge.x - currentCharge.x;
-                const dy = nextCharge.y - currentCharge.y;
-                if (dx === 0 && dy === 0) {
-                    currentCharge.angle = 0;
-                } else {
-                    currentCharge.angle = Math.atan2(dy, dx);
-                }
-            }
-        }
-    }
-
-    function drawStreamlinePlot() {
-
-        
-        streamlineStartingAngles();
-
-        let departures_all_charges = charges.map(charge => 
-            ({charge: charge, departures: new StreamDepartures(Math.abs(charge.charge) * 6,
-                                                               charge.angle)}));
-
-        // sort departures_all_charges by charge magnitude in ascending order
-        departures_all_charges.sort((a, b) => Math.abs(a.charge.charge) - Math.abs(b.charge.charge));
-        
-
-        for (let {charge, departures} of departures_all_charges) {
-            const x = charge.x;
-            const y = charge.y;
-
-            while(true) {
-                
-                console.log("Charge", charge, "departures", departures.departures);
-                const stream_angle = departures.get_new_departure();
-                console.log("New departure", stream_angle);
-                if (stream_angle === null) break;
-
-                let stream_x = x + chargeSize * Math.cos(stream_angle);
-                let stream_y = y + chargeSize * Math.sin(stream_angle);
-                let length_covered = 0;
-
-                if (charge.charge>0) {
-                    ctx.strokeStyle = 'red';
-                } else {
-                    ctx.strokeStyle = 'blue';
-                }
-
-                ctx.beginPath();
-                ctx.moveTo(stream_x, stream_y);
-
-                const step = charge.charge>0?2:-2;
-
-                console.log("Start", stream_angle, stream_x, stream_y);
-
-                let n_steps = 0;
-
-                while(stream_x>0 && stream_x<rect.width && stream_y>0 && stream_y<rect.height 
-                    && (length_covered<20 || getChargeFromPoint(stream_x, stream_y) === null)
-                    && n_steps < 1000) {
-                    n_steps++;
-
-                    const E = computeField(field, stream_x, stream_y);
-                    const u = E[0];
-                    const v = E[1];
-                    const norm = Math.sqrt(u * u + v * v);
-                    
-                    stream_x += step * u / norm;
-                    stream_y += step * v / norm;
-
-                    // corrector step
-                    const E2 = computeField(field, stream_x, stream_y);
-                    const u2 = E[0];
-                    const v2 = E[1];
-                    const norm2 = Math.sqrt(u2 * u2 + v2 * v2);
-
-                    stream_x += step * (u2 / norm2 - u / norm)/2;
-                    stream_y += step * (v2 / norm2 - v / norm)/2;
-
-                    length_covered += Math.abs(step);
-                    ctx.lineTo(stream_x, stream_y, u, v);
-                }
-
-                let landed_charge = getChargeFromPoint(stream_x, stream_y);
-                if (landed_charge !== null) {
-                    console.log("Landed charge", landed_charge);
-                    // now register the arrival of the stream at the charge
-                    const angle = Math.atan2(stream_y - landed_charge.y, stream_x - landed_charge.x);
-                    departures_all_charges.find(d => d.charge === landed_charge).departures.add_departure(angle);
-                }
-                ctx.stroke();
-            }
-
-        }        
-    }
 
     function drawArrow(x, y, u, v) {
         let arrowLength = Math.sqrt(u * u + v * v);
@@ -526,20 +411,7 @@ export async function main() {
         }
     }
 
-    function getChargeFromPoint(x, y, allowRadius) {
-        if (allowRadius == null) 
-            allowRadius = chargeSize;
-        for (let i = charges.length - 1; i >= 0; i--) {
-            // go in reverse order so that the charge on top is selected first
-            const charge = charges[i];
-            const dx = x - charge.x;
-            const dy = y - charge.y;
-            if (Math.sqrt(dx * dx + dy * dy) < allowRadius) {
-                return charge;
-            }
-        }
-        return null;
-    }
+    
 
     function getChargeFromEvent(event) {
         const { offsetX, offsetY } = coordinatesFromMouseOrTouch(event);
@@ -547,7 +419,7 @@ export async function main() {
         if (event.touches) {
             allowRadius = event.touches[0].radiusX + chargeSize;
         } 
-        return getChargeFromPoint(offsetX, offsetY, allowRadius);
+        return getChargeFromPoint(charges, offsetX, offsetY, allowRadius);
     }
 
     function mouseOrTouchDown(event) {
@@ -621,7 +493,13 @@ export async function main() {
         addCharge(canvas.width / (2*dpr), canvas.height / (2*dpr), -1);
     });
 
-    plotTypeSelect.addEventListener('change', drawVectorField);
+    /*
+    fieldStrength.addEventListener('input', () => {
+        const strength = parseFloat(fieldStrength.value);
+        field.set_ey_field_strength(strength);
+        drawVectorField();
+    });
+    */
 
     drawVectorField();
 }

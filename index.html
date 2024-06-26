@@ -77,25 +77,23 @@
 <body>
     <h1>Electromagnetism Explorer</h1>
     <div class="controls">
-        <label for="plotType">Plot Type:</label>
-        <select id="plotType">
-            <option value="quiver">Quiver</option>
-            <option value="streamline">Streamline</option>
-        </select>
         <label for="solver">Solver:</label>
         <select id="solver">
-            <option value="electrostatic_direct" selected>Electrostatic Direct</option>
-            <option value="electrostatic_fourier">Electrostatic Fourier</option>
-            <option value="dynamic">Dynamic</option>
-            <option value="magnetostatic_direct">Magentostatic Direct</option>
+            <option value="electrostatic_direct" selected>Electrostatic vectors [3D in-plane]</option>
+            <option value="electrostatic_direct_fieldline">Electrostatic fieldlines [3D in-plane]</option>
+            <option value="electrostatic_fourier">Electrostatic vectors [2D]</option>
+            <option value="dynamic">Dynamic electric field [2D]</option>
+            <option value="magnetostatic_direct">Magentostatic</option>
         </select>
 
         <button id="addPositiveCharge">Add Positive <span class="charge_or_current">Charge</span></button>
         <button id="addNegativeCharge">Add Negative <span class="charge_or_current">Charge</span></button>
+        <!-- <label for="fieldStrength">Add field strength:</label>
+        <input type="range" id="fieldStrength" min="-10" max="10" value="0">-->
     </div>
     <div class="charge-properties">
         <label for="charge"><span class="charge_or_current">Charge</span>:</label>
-        <input type="range" id="charge" min="-10" max="10" step="1" value="${charge.charge}">
+        <input type="range" id="charge" min="-10" max="10" step="1" value="1">
         <button id="deleteCharge">Delete <span class="charge_or_current">Charge</span></button>
     </div>
     <canvas id="vectorFieldCanvas" width="800" height="600"></canvas>
