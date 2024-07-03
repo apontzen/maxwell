@@ -16,10 +16,18 @@ class StreamDepartures {
         if(departure_index>=this.num_departures)
             return null;
         let angle; 
+
+        // in case we find there is a problem with a streamline at one end of our range, we
+        // interleave the departures, so that while departure_index runs from 0 to n-1 inclusive,
+        // departure_index_interleaved jumps from 0 to n-1 to 1 to n-2 to 2 to n-3, etc.
+        // Then, if a problem is found at one end of the range, the correction is made and the
+        // streamlines don't bunch up around that end.
+        const departure_index_interleaved = (departure_index%2==0)?(departure_index/2):(this.num_departures - 1 - (departure_index-1)/2);
+
         if (this.restricted_angle) {
-            angle = this.starting_angle + (departure_index+1) * (this.ending_angle - this.starting_angle) / (this.num_departures + 1);
+            angle = this.starting_angle + (departure_index_interleaved+1) * (this.ending_angle - this.starting_angle) / (this.num_departures + 1);
         } else {
-            angle = this.starting_angle + (departure_index+0.5) * (this.ending_angle - this.starting_angle) / (this.num_departures );
+            angle = this.starting_angle + (departure_index_interleaved+0.5) * (this.ending_angle - this.starting_angle) / (this.num_departures );
         }
         this.next_departure_index++;
         return angle%(2*Math.PI);
@@ -99,6 +107,9 @@ export function drawfieldlinePlot(charges, field, ctx, rect, chargeSize) {
         const x = charge.x;
         const y = charge.y;
 
+        let num_failed_launches = 0;
+        const max_failed_launches = 20;
+
         while(true) {
             const stream_angle = departures.get_new_departure();
             if (stream_angle === null) break;
@@ -176,12 +187,16 @@ export function drawfieldlinePlot(charges, field, ctx, rect, chargeSize) {
                 if(arrived_at.next_departure_index==arrived_at.num_departures) {
                     // Argh! We made a mistake. We've arrived at a charge that has no more field lines to launch.
                     // We need to backtrack and try again.
-
-                    console.log("Failed streamline launch. Backtracking.");
-                    departures.next_departure_index--;
-                    departures.register_arrival(stream_angle);
-                    departures.num_departures++;
-                    continue;
+                    num_failed_launches++;
+                    if(num_failed_launches>max_failed_launches) {
+                        console.log("Too many failed streamline launches. Will display the wrong number of fieldlines from at least one charge.");
+                    } else {
+                        console.log("Failed streamline launch. Backtracking.");
+                        departures.next_departure_index--;
+                        departures.register_arrival(stream_angle);
+                        departures.num_departures++;
+                        continue;
+                    }
 
                 } else {
                     arrived_at.register_arrival(angle);
