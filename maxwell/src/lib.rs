@@ -90,6 +90,21 @@ impl Geometry {
         }
     }
 
+    fn position_to_surrounding_cells(&self, x: f64, y: f64) -> Vec<(usize, usize)> {
+        let (i, j) = self.position_to_cell_unclamped(x, y);
+        let mut result = vec![];
+        for i_offset in -1..2 {
+            for j_offset in -1..2 {
+                let i = i + i_offset;
+                let j = j + j_offset;
+                if i >= 0 && i < self.nx as isize && j >= 0 && j < self.ny as isize {
+                    result.push((i as usize, j as usize));
+                }
+            }
+        }
+        result
+    }
+
     fn position_to_cell_unclamped(&self, x: f64, y: f64) -> (isize, isize) {
         let i = (x / self.x_max * (self.nx - 2*self.nboundary) as f64) as isize + self.nboundary as isize;
         let j = (y / self.y_max * (self.ny - 2*self.nboundary) as f64) as isize + self.nboundary as isize;
@@ -612,6 +627,7 @@ pub fn generate_potential_contours_at_level(field_configuration: &FieldConfigura
 
     loop {
         if contours.len() >= MAX_CONTOURS {
+            console::log_1(&format!("Ran out of contours for {}",level).into());
             break;
         }
 
@@ -633,10 +649,13 @@ pub fn generate_potential_contours_at_level(field_configuration: &FieldConfigura
 
         // unflag cells that have been visited by this contour
         contour.iter().for_each(|(x, y)| {
-            match field_configuration.geometry.position_to_cell(*x, *y) {
+            field_configuration.geometry.position_to_surrounding_cells(*x, *y).iter().for_each(
+                |(it, jt)| { crossing_flags[[*it,*jt]] = false; }
+            );
+            /*match field_configuration.geometry.position_to_cell(*x, *y) {
                 Some((it, jt)) => crossing_flags[[it, jt]] = false,
                 None => (),
-            }
+            }*/
         });
 
 

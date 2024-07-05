@@ -40,7 +40,7 @@ export async function main() {
     let draggingOffsetX = 0;
     let draggingOffsetY = 0;
 
-    let cic_resolution = 32;
+    let cic_resolution = 128;
 
     const dpr = window.devicePixelRatio || 1;
 
@@ -161,10 +161,12 @@ export async function main() {
         const y0 = 200.0;
         if (charges.length > 0) {
             drawPotentialContour(field, 0, ctx, 'grey');
+            drawPotentialContour(field, 125, ctx, 'blue');
             drawPotentialContour(field, 250, ctx, 'blue');
             drawPotentialContour(field, 500, ctx, 'blue');
             drawPotentialContour(field, 1000, ctx, 'blue');
 
+            drawPotentialContour(field, -125, ctx, 'red');
             drawPotentialContour(field, -250, ctx, 'red');
             drawPotentialContour(field, -500, ctx, 'red');
             drawPotentialContour(field, -1000, ctx, 'red');
