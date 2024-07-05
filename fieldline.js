@@ -1,4 +1,4 @@
-import { compute_field_electrostatic_direct } from './maxwell/out/maxwell.js';
+import { compute_field_electrostatic_direct, generate_potential_contours_at_level } from './maxwell/out/maxwell.js';
 import { getChargeFromPoint, chargeSize } from './ui.js';
 
 class StreamDepartures {
@@ -139,8 +139,8 @@ export function drawfieldlinePlot(charges, field, ctx, rect, chargeSize) {
                 n_steps++;
 
                 const E = compute_field_electrostatic_direct(field, stream_x, stream_y);
-                let u = E[0];
-                let v = E[1];
+                let u = E.u;
+                let v = E.v;
                 let norm = Math.sqrt(u * u + v * v);
 
                 if (norm<1e-4) {
@@ -159,8 +159,8 @@ export function drawfieldlinePlot(charges, field, ctx, rect, chargeSize) {
 
                 // corrector step
                 const E2 = compute_field_electrostatic_direct(field, stream_x, stream_y);
-                const u2 = E2[0];
-                const v2 = E2[1];
+                const u2 = E2.u;
+                const v2 = E2.v;
                 const norm2 = Math.sqrt(u2 * u2 + v2 * v2);
 
                 if(norm2>1e-4) {
@@ -215,8 +215,8 @@ export function drawfieldlinePlot(charges, field, ctx, rect, chargeSize) {
             stream_y = y_steps[Math.round(y_steps.length/2)];
 
             const E = compute_field_electrostatic_direct(field, stream_x, stream_y);
-            const u = E[0];
-            const v = E[1];
+            const u = E.u;
+            const v = E.v;
             ctx.save();
             ctx.translate(stream_x, stream_y);
             ctx.rotate(Math.atan2(v, u));
@@ -233,4 +233,25 @@ export function drawfieldlinePlot(charges, field, ctx, rect, chargeSize) {
         }
 
     }        
+}
+
+
+export function drawPotentialContour(charges, level, ctx, color) {
+    let contours = generate_potential_contours_at_level(charges, level);
+
+    for (let contour of contours) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.0;
+        ctx.beginPath();
+        for (let i = 0; i < contour.length; i++) {
+            const [x, y] = contour[i];
+            if (i === 0) {
+                ctx.moveTo(x, y);
+            } else {
+                ctx.lineTo(x, y);
+            }
+        }
+        ctx.stroke();
+    }
+
 }

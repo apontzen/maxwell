@@ -1,7 +1,7 @@
 import init, { compute_field_electrostatic_direct, compute_field_magnetostatic_direct, 
     compute_electric_field_dynamic, init_panic_hook, FieldConfiguration } from './maxwell/out/maxwell.js';
 
-import { drawfieldlinePlot } from './fieldline.js';
+import { drawfieldlinePlot, drawPotentialContour } from './fieldline.js';
 
 export const chargeSize = 10;
 
@@ -40,7 +40,7 @@ export async function main() {
     let draggingOffsetX = 0;
     let draggingOffsetY = 0;
 
-    let cic_resolution = 128;
+    let cic_resolution = 32;
 
     const dpr = window.devicePixelRatio || 1;
 
@@ -157,9 +157,21 @@ export async function main() {
             // if dynamic, the fields are being updated in real time and we don't want to reset them
         }
 
-        const vectors = generateVectors();
-        
+        const x0 = 200.0;
+        const y0 = 200.0;
+        if (charges.length > 0) {
+            drawPotentialContour(field, 0, ctx, 'grey');
+            drawPotentialContour(field, 250, ctx, 'blue');
+            drawPotentialContour(field, 500, ctx, 'blue');
+            drawPotentialContour(field, 1000, ctx, 'blue');
+
+            drawPotentialContour(field, -250, ctx, 'red');
+            drawPotentialContour(field, -500, ctx, 'red');
+            drawPotentialContour(field, -1000, ctx, 'red');
+        }
+
         if (plotType === 'quiver') {
+            const vectors = generateVectors();
             drawQuiverPlot(vectors);
         } else if (plotType === 'fieldline') {
             drawfieldlinePlot(charges, field, ctx, rect, chargeSize);
@@ -190,7 +202,7 @@ export async function main() {
                     return Math.sqrt(dx * dx + dy * dy) < step;
                 })) continue;
                 const vector = computeField(field, x, y);
-                vectors.push({x, y, u: vector[0], v: vector[1]});
+                vectors.push({x, y, u: vector.u, v: vector.v});
             }
         }
         
