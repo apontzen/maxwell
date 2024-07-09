@@ -50,6 +50,10 @@ fn generate_potential_contours(description: &ContouringCollection, x0: f64, y0: 
         x -= step_size * 0.5 * (v1 - v) / r1;
         y += step_size * 0.5 * (u1 - u) / r1;
 
+        if ((description.potential_calculator)(field_configuration, x, y) - level).abs() > 0.1 {
+            (x,y) = find_crossing_point(description, level, x, y);
+        }
+
         step += 1;
 
         if step % RETURN_EVERY == 0 {
