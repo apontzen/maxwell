@@ -372,6 +372,21 @@ impl FieldConfiguration {
         let elec_y = evaluate_grid_interpolated_or_0(self, &self.elec_y, x, y);
         (elec_x, elec_y)
     }
+
+    pub fn closest_charge(&self, x: f64, y: f64) -> Option<&Charge> {
+        let mut closest_charge: Option<&Charge> = None;
+        let mut closest_distance: f64 = 1.0e9;
+        for charge in &self.charges {
+            let dx = x - charge.x;
+            let dy = y - charge.y;
+            let distance = (dx*dx + dy*dy).sqrt();
+            if distance < closest_distance {
+                closest_charge = Some(charge);
+                closest_distance = distance;
+            }
+        }
+        closest_charge
+    }
 }
 
 #[wasm_bindgen]

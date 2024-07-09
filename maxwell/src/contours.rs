@@ -2,7 +2,7 @@ use wasm_bindgen::prelude::*;
 #[allow(unused)]
 use serde_wasm_bindgen::{from_value, to_value};
 use ndarray::Array2;
-use crate::{Pair, FieldConfiguration};
+use crate::{Pair, FieldConfiguration, Charge};
 use web_sys::console;
 
 type PotentialCalculator = fn(&FieldConfiguration, f64, f64) -> f64;
@@ -194,7 +194,20 @@ fn generate_contours_at_level(description: &ContouringCollection, level: f64) ->
 
         // Now follow the contour from this cell
         let (mut x, mut y) = field_configuration.geometry.cell_to_centroid(i, j);
+
+        let closest_charge = field_configuration.closest_charge(x,y).unwrap(); // this definitely exists
+        
+        let distance_to_closest = ((x-closest_charge.x).powi(2) + (y-closest_charge.y).powi(2)).sqrt();
+
+        
+        // console::log_1(&format!("Distance to closest charge: {}", distance_to_closest).into());
+        if distance_to_closest < 40. {
+            // too close, not interested
+            continue;
+        }
+        
         (x, y) = find_crossing_point(&description, level, x, y);
+
         
         
         let contour = generate_potential_contours(&description, x, y, level, false);
@@ -204,10 +217,6 @@ fn generate_contours_at_level(description: &ContouringCollection, level: f64) ->
             field_configuration.geometry.position_to_surrounding_cells(*x, *y).iter().for_each(
                 |(it, jt)| { crossing_flags[[*it,*jt]] = false; }
             );
-            /*match field_configuration.geometry.position_to_cell(*x, *y) {
-                Some((it, jt)) => crossing_flags[[it, jt]] = false,
-                None => (),
-            }*/
         });
 
 

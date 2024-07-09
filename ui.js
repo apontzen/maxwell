@@ -40,6 +40,8 @@ export async function main() {
     let draggingOffsetX = 0;
     let draggingOffsetY = 0;
 
+    let nextChargeStrength = 1;
+
     let cic_resolution = 128;
 
     const dpr = window.devicePixelRatio || 1;
@@ -199,11 +201,13 @@ export async function main() {
             } else if (computeField === compute_field_magnetostatic_direct) {
                 // Here we take cheeky advantage of the fact that the magnetostatic field lines are equivalent to
                 // equipotential lines if we were solving an electrostatic problem. 
-                for (let level=0; level<1000; level+=250) {
+                for (let level=0; level<1500; level+=125) {
                     drawPotentialContour(field, level, ctx, 'black', true);
                     if(level>0)
                         drawPotentialContour(field, -level, ctx, 'black', true);
                 }
+                drawPotentialContour(field, 20, ctx, 'black', true);
+                drawPotentialContour(field, -20, ctx, 'black', true);
 
             } else {
                 console.error('Fieldlines not supported for this solver');
@@ -344,6 +348,10 @@ export async function main() {
     function deselectCharge() {
         const chargeProperties = document.querySelector('.charge-properties');
         chargeProperties.style.display = 'none';
+        if (selectedCharge !== null) {
+            nextChargeStrength = selectedCharge.charge;         
+        }
+
         selectedCharge = null;
         drawVectorField();
     }
@@ -499,7 +507,7 @@ export async function main() {
             draggingCharge.x = offsetX - draggingOffsetX;
             draggingCharge.y = offsetY - draggingOffsetY;
             if(!dynamic)    
-                drawVectorField();
+                window.requestAnimationFrame(drawVectorField);
         }
     }
 
@@ -522,9 +530,11 @@ export async function main() {
         if (existingCharge!==null) {
             deselectCharge();
             deleteCharge(existingCharge);
+            drawVectorField();
         } else {
             const { offsetX, offsetY } = event;
-            addCharge(offsetX, offsetY, 1);
+            deselectCharge();
+            addCharge(offsetX, offsetY, nextChargeStrength);
             selectCharge(charges[charges.length - 1]);
         }
         return false;
