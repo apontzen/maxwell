@@ -1,10 +1,7 @@
-use std::array;
-
 use ndarray::{Array2};
 use num_complex::Complex;
-use web_sys::console::log;
 use crate::fourier;
-use crate::Geometry;
+use crate::geometry::Geometry;
 
 pub struct Stencils {
     pub del_squared_inv: Option<Array2<Complex<f64>>>,
@@ -16,6 +13,7 @@ pub struct Stencils {
 
 }
 
+#[allow(dead_code)]
 pub enum StencilType {
     DelSquared,
     GradX,
@@ -25,11 +23,13 @@ pub enum StencilType {
     Soften,
 }
 
+#[allow(dead_code)]
 pub enum DifferenceType {
     Forward,
     Backward,
     Central,
 }
+
 
 impl Stencils {
     pub fn new(geometry: Geometry) -> Stencils {
@@ -69,7 +69,7 @@ impl Stencils {
 
 
     fn invert_fourier_stencil(&self, array: &mut ndarray::Array2<Complex<f64>>) {
-        let mut slice = array.as_slice_mut().unwrap();
+        let slice = array.as_slice_mut().unwrap();
         let max_abs_val = slice.iter().map(|x| x.norm()).max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)).unwrap_or(0.0);
         if max_abs_val == 0.0 {
             return;
@@ -106,8 +106,6 @@ impl Stencils {
 
         let sigma_x = self.soften_sigma_x;
         let sigma_y = self.soften_sigma_y;
-
-        let mut norm: f64 = 0.0; 
 
         let i_cen_signed = i_cen as isize;
         let j_cen_signed = j_cen as isize;
@@ -198,9 +196,9 @@ impl Stencils {
         let ny = array.dim().1;
         match stencil_type {
             StencilType::GradX => {
-                let i_plus_one = if(i<nx-1) {i+1} else {0};
-                let i_minus_one = if(i>0) {i-1} else {nx-1};
-                match(difference_type) {
+                let i_plus_one = if i<nx-1 {i+1} else {0};
+                let i_minus_one = if i>0 {i-1} else {nx-1};
+                match difference_type {
                     DifferenceType::Forward => dx_inv * (array[[i_plus_one, j]] - array[[i, j]]),
                     DifferenceType::Backward => dx_inv * (array[[i, j]] - array[[i_minus_one, j]]),
                     DifferenceType::Central => dx_inv_by_2 * (array[[i_plus_one, j]] - array[[i_minus_one, j]]),
@@ -209,7 +207,7 @@ impl Stencils {
             StencilType::GradY => {
                 let j_plus_one = if j < ny - 1 { j + 1 } else { 0 };
                 let j_minus_one = if j > 0 { j - 1 } else { ny - 1 };
-                match(difference_type) {
+                match difference_type {
                     DifferenceType::Forward => dy_inv * (array[[i, j_plus_one]] - array[[i, j]]),
                     DifferenceType::Backward => dy_inv * (array[[i, j]] - array[[i, j_minus_one]]),
                     DifferenceType::Central => dy_inv_by_2 * (array[[i, j_plus_one]] - array[[i, j_minus_one]]),
@@ -237,12 +235,6 @@ impl Stencils {
             StencilType::GradYDelSquaredInv | StencilType::GradY => self.apply_grad(&scratch, array, StencilType::GradY, difference_type),
             _ => array.clone_from(&scratch),
         };
-    }
-
-    pub fn apply_non_destructively(&self, array: &Array2<f64>, stencil_type: StencilType, difference_type: DifferenceType) -> Array2<f64> {
-        let mut result = array.clone();
-        self.apply(&mut result, stencil_type, difference_type);
-        result
     }
 
 }

@@ -3,13 +3,14 @@ use serde::{Serialize, Deserialize};
 use serde_wasm_bindgen::{from_value, to_value};
 use console_error_panic_hook;
 use web_sys::console as console;
-use ndarray::{Array2};
-use std::{f32::consts::E, fmt::{self, Debug, Formatter}};
-use num::integer::gcd;
+use ndarray::Array2;
+use std::fmt::{self, Debug, Formatter};
+use crate::geometry::Geometry;
 
 mod stencil;
 mod fourier;
 mod pml;
+mod geometry;
 
 const FIELD_SCALING: f64 = 20000.0;
 const SOFTEN: f64 = 5.0;
@@ -58,104 +59,18 @@ impl Debug for Charge {
 }
 
 
-#[derive(Clone)]
-pub struct Geometry {
-    /// maximum x extent of the physical region. Physical region runs from 0 to x_max; boundary cells extend further.
-    x_max: f64, 
-    /// maximum y extent of the physical region. Physical region runs from 0 to y_max; boundary cells extend further.
-    y_max: f64, 
-    /// number of grid cells in x direction, including boundary cells (=2*nboundary)
-    nx: usize, 
-    /// number of grid cells in y direction, including boundary cells (=2*nboundary)
-    ny: usize, 
-    /// number of boundary cells on each side
-    nboundary: usize, 
-}
-
-impl Geometry {
-    fn delta_x(&self) -> f64 {
-        self.x_max / (self.nx - 2 * self.nboundary) as f64
-    }
-
-    fn delta_y(&self) -> f64 {
-        self.y_max / (self.ny - 2 * self.nboundary) as f64
-    }
-
-    fn position_to_cell(&self, x: f64, y: f64) -> Option<(usize, usize)> {
-        let (i, j) = self.position_to_cell_unclamped(x, y);
-        if i < 0 || i >= self.nx as isize || j < 0 || j >= self.ny as isize {
-            None
-        } else {
-            Some((i as usize, j as usize))
-        }
-    }
-
-    fn position_to_surrounding_cells(&self, x: f64, y: f64) -> Vec<(usize, usize)> {
-        let (i, j) = self.position_to_cell_unclamped(x, y);
-        let mut result = vec![];
-        for i_offset in -1..2 {
-            for j_offset in -1..2 {
-                let i = i + i_offset;
-                let j = j + j_offset;
-                if i >= 0 && i < self.nx as isize && j >= 0 && j < self.ny as isize {
-                    result.push((i as usize, j as usize));
-                }
-            }
-        }
-        result
-    }
-
-    fn position_to_cell_unclamped(&self, x: f64, y: f64) -> (isize, isize) {
-        let i = (x / self.x_max * (self.nx - 2*self.nboundary) as f64) as isize + self.nboundary as isize;
-        let j = (y / self.y_max * (self.ny - 2*self.nboundary) as f64) as isize + self.nboundary as isize;
-        (i, j)
-    }
-
-    fn cell_to_centroid(&self, i: usize, j: usize) -> (f64, f64) {
-        let x = (i as f64 - self.nboundary as f64 + 0.5) * self.delta_x();
-        let y = (j as f64 - self.nboundary as f64 + 0.5) * self.delta_y();
-        (x, y)
-    }
-
-    fn cell_to_corners(&self, i: usize, j: usize) -> Vec<(f64, f64)> {
-        let x0 = (i as f64 - self.nboundary as f64) * self.delta_x();
-        let x1 = (i as f64 - self.nboundary as f64 + 1.0) * self.delta_x();
-        let y0 = (j as f64 - self.nboundary as f64) * self.delta_y();
-        let y1 = (j as f64 - self.nboundary as f64 + 1.0) * self.delta_y();
-        
-        vec![(x0, y0), (x1, y0), (x0, y1), (x1, y1)]
-    }
-
-    fn x_extent_including_boundary(&self) -> f64 {
-        self.x_max * self.nx as f64 / (self.nx - 2*self.nboundary) as f64
-    }
-
-    fn y_extent_including_boundary(&self) -> f64 {
-        self.y_max * self.ny as f64 / (self.ny - 2*self.nboundary) as f64
-    }
-
-    fn in_padding_region(&self, x: f64, y: f64) -> bool {
-        let min_x = -(self.nboundary as f64) * self.delta_x();
-        let max_x = (self.nx as f64 - self.nboundary as f64) * self.delta_x();
-        let min_y = -(self.nboundary as f64) * self.delta_y();
-        let max_y = (self.ny as f64 - self.nboundary as f64) * self.delta_y();
-        x>=min_x && x<=max_x && y>=min_y && y<=max_y
-    }
-
-}
-
 #[wasm_bindgen]
 pub struct FieldConfiguration {
     charges: Vec<Charge>,
     charges_at_last_tick: Vec<Charge>, 
     geometry: Geometry,
     cic_grid: Option<Array2<f64>>,
-    Ex_grid: Option<Array2<f64>>,
-    Ey_grid: Option<Array2<f64>>,
-    jx_grid: Option<Array2<f64>>,
-    jy_grid: Option<Array2<f64>>,
-    Bz_grid: Option<Array2<f64>>,
-    Bz_integral_grid: Option<Array2<f64>>, /// Bz field integrated over time, for use in the PML boundary conditions
+    elec_x: Option<Array2<f64>>,
+    elec_y: Option<Array2<f64>>,
+    current_x: Option<Array2<f64>>,
+    current_y: Option<Array2<f64>>,
+    mag_z: Option<Array2<f64>>,
+    mag_z_integral: Option<Array2<f64>>, /// Bz field integrated over time, for use in the PML boundary conditions
     stencils: stencil::Stencils,
     charge_normalization: f64,
 }
@@ -229,7 +144,7 @@ impl FieldConfiguration {
         let cell_area = geometry.delta_x() * geometry.delta_y();
         let charge_normalization = 4000.0 / cell_area;
         FieldConfiguration { charges: vec![], charges_at_last_tick: vec![], geometry, 
-            cic_grid: None, Ex_grid: None, Ey_grid: None, Bz_grid: None, Bz_integral_grid: None, jx_grid: None, jy_grid: None,
+            cic_grid: None, elec_x: None, elec_y: None, mag_z: None, mag_z_integral: None, current_x: None, current_y: None,
             stencils: stencil::Stencils::new(geometry_clone), charge_normalization }
     }
 
@@ -245,12 +160,12 @@ impl FieldConfiguration {
 
     pub fn reset_fields(&mut self) {
         self.cic_grid = None;
-        self.Ex_grid = None;
-        self.Ey_grid = None;
-        self.Bz_grid = None;
-        self.Bz_integral_grid = None;
-        self.jx_grid = None;
-        self.jy_grid = None;
+        self.elec_x = None;
+        self.elec_y = None;
+        self.mag_z = None;
+        self.mag_z_integral = None;
+        self.current_x = None;
+        self.current_y = None;
     }
 
 
@@ -259,7 +174,7 @@ impl FieldConfiguration {
         
         if let Some(ref mut grid) = self.cic_grid {
             for charge in &self.charges {
-                if(charge.x<0.0 || charge.x>self.geometry.x_max || charge.y<0.0 || charge.y>self.geometry.y_max) {
+                if charge.x<0.0 || charge.x>self.geometry.x_max || charge.y<0.0 || charge.y>self.geometry.y_max {
                     console::log_1(&format!("Charge out of bounds: {:?}", charge).into());
                     continue;
                 }
@@ -272,18 +187,18 @@ impl FieldConfiguration {
     pub fn initialize_on_constraints(&mut self) {
         self.make_cic_grid();
 
-        let mut Ey: Array2<f64> = self.cic_grid.as_ref().unwrap().clone();
-        let mut Ex = Ey.clone();
-        self.stencils.apply(&mut Ey, stencil::StencilType::GradYDelSquaredInv, stencil::DifferenceType::Forward);
-        self.stencils.apply(&mut Ex, stencil::StencilType::GradXDelSquaredInv, stencil::DifferenceType::Forward);
+        let mut elec_y: Array2<f64> = self.cic_grid.as_ref().unwrap().clone();
+        let mut elec_x = elec_y.clone();
+        self.stencils.apply(&mut elec_y, stencil::StencilType::GradYDelSquaredInv, stencil::DifferenceType::Forward);
+        self.stencils.apply(&mut elec_x, stencil::StencilType::GradXDelSquaredInv, stencil::DifferenceType::Forward);
 
-        self.Ey_grid = Some(Ey);
-        self.Ex_grid = Some(Ex);
-        self.Bz_grid = Some(Array2::<f64>::zeros((self.geometry.nx, self.geometry.ny)));
-        self.Bz_integral_grid = Some(Array2::<f64>::zeros((self.geometry.nx, self.geometry.ny)));
+        self.elec_y = Some(elec_y);
+        self.elec_x = Some(elec_x);
+        self.mag_z = Some(Array2::<f64>::zeros((self.geometry.nx, self.geometry.ny)));
+        self.mag_z_integral = Some(Array2::<f64>::zeros((self.geometry.nx, self.geometry.ny)));
 
-        self.jx_grid = Some(Array2::<f64>::zeros((self.geometry.nx, self.geometry.ny)));
-        self.jy_grid = Some(Array2::<f64>::zeros((self.geometry.nx, self.geometry.ny)));
+        self.current_x = Some(Array2::<f64>::zeros((self.geometry.nx, self.geometry.ny)));
+        self.current_y = Some(Array2::<f64>::zeros((self.geometry.nx, self.geometry.ny)));
       
         self.charges_at_last_tick = self.charges.clone();
         
@@ -292,7 +207,7 @@ impl FieldConfiguration {
 
     pub fn ensure_initialized(&mut self) {
         // Basic case: initialize if we have no fields yet
-        if self.Ey_grid.is_none() {
+        if self.elec_y.is_none() {
             self.initialize_on_constraints();
         }
 
@@ -325,8 +240,8 @@ impl FieldConfiguration {
         // 
         // This is calculated by finding an approximate straight line between the locations of the charges
         
-        let jx = self.jx_grid.as_mut().unwrap();
-        let jy = self.jy_grid.as_mut().unwrap();
+        let jx = self.current_x.as_mut().unwrap();
+        let jy = self.current_y.as_mut().unwrap();
         
         jx.fill(0.0);
         jy.fill(0.0);
@@ -395,22 +310,22 @@ impl FieldConfiguration {
 
         // Now we are ready to evolve the fields by one timestep. Note that the B and density 
         // fields are half a tick behind and half a grid cell to the left of the E and j fields.
-        let Ex = self.Ex_grid.as_mut().unwrap();
-        let Ey = self.Ey_grid.as_mut().unwrap();
-        let Bz = self.Bz_grid.as_mut().unwrap();
-        let Bz_integral = self.Bz_integral_grid.as_mut().unwrap();
-        let jx = self.jx_grid.as_ref().unwrap();
-        let jy = self.jy_grid.as_ref().unwrap();
+        let elec_x = self.elec_x.as_mut().unwrap();
+        let elec_y = self.elec_y.as_mut().unwrap();
+        let mag_z = self.mag_z.as_mut().unwrap();
+        let mag_z_integral = self.mag_z_integral.as_mut().unwrap();
+        let current_x = self.current_x.as_ref().unwrap();
+        let current_y = self.current_y.as_ref().unwrap();
 
 
         // Evolve Bz field first, to get it from half a tick behind to half a tick ahead of the E field
         for (i, j, sigma_x, sigma_y) in pml::pml_iterator_from_geometry(&self.geometry) {
             
-            let d_Ex_dy = self.stencils.evaluate(&Ex, i, j, &stencil::StencilType::GradY, &stencil::DifferenceType::Forward);
-            let d_Ey_dx = self.stencils.evaluate(&Ey, i, j, &stencil::StencilType::GradX, &stencil::DifferenceType::Forward);
+            let d_elec_x_dy = self.stencils.evaluate(&elec_x, i, j, &stencil::StencilType::GradY, &stencil::DifferenceType::Forward);
+            let d_elec_y_dx = self.stencils.evaluate(&elec_y, i, j, &stencil::StencilType::GradX, &stencil::DifferenceType::Forward);
 
             // dB_z/dt = -dE_x/dy + dE_y/dx
-            Bz[[i,j]] += (d_Ex_dy - d_Ey_dx) * delta_t;
+            mag_z[[i,j]] += (d_elec_x_dy - d_elec_y_dx) * delta_t;
             
             // Now add the PML damping terms. This is a non-physical term that damps the fields near the boundary to 
             // mimic vacuum BCs. This is explained in the following sources:
@@ -418,14 +333,14 @@ impl FieldConfiguration {
             //    the equations are there)
             //  * https://arxiv.org/abs/2108.05348 (this is nicely clear but not explicit for the EM case)
 
-            Bz[[i,j]] += (-(sigma_x+sigma_y) * Bz[[i, j]] - sigma_x*sigma_y * Bz_integral[[i,j]]) * delta_t;
+            mag_z[[i,j]] += (-(sigma_x+sigma_y) * mag_z[[i, j]] - sigma_x*sigma_y * mag_z_integral[[i,j]]) * delta_t;
 
             // Finally update the integral of Bz over time (which is just used for the PML damping, not anything physical)
             // Note that in tests I found neglecting the integral terms in the PML didn't make a huge difference to the
             // level of reflections (just a qualitative observation, not a rigorous test). Without the integral terms,
             // it's pretty obviously just a local damping term.
             
-            Bz_integral[[i,j]] += Bz[[i,j]] * delta_t;
+            mag_z_integral[[i,j]] += mag_z[[i,j]] * delta_t;
             
 
             
@@ -433,27 +348,27 @@ impl FieldConfiguration {
 
         // Now the B field is half a tick ahead, so update the E field a tick to get ahead again
         for (i, j, sigma_x, sigma_y) in pml::pml_iterator_from_geometry(&self.geometry) {
-            let d_Bz_dy = self.stencils.evaluate(&Bz, i, j, &stencil::StencilType::GradY, &stencil::DifferenceType::Backward);
-            let d_Bz_dx = self.stencils.evaluate(&Bz, i, j, &stencil::StencilType::GradX, &stencil::DifferenceType::Backward);
-            Ex[[i,j]] += (d_Bz_dy - jx[[i,j]]) * delta_t;
-            Ey[[i,j]] += (-d_Bz_dx - jy[[i,j]]) * delta_t;
+            let d_magz_dy = self.stencils.evaluate(&mag_z, i, j, &stencil::StencilType::GradY, &stencil::DifferenceType::Backward);
+            let d_magz_dx = self.stencils.evaluate(&mag_z, i, j, &stencil::StencilType::GradX, &stencil::DifferenceType::Backward);
+            elec_x[[i,j]] += (d_magz_dy - current_x[[i,j]]) * delta_t;
+            elec_y[[i,j]] += (-d_magz_dx - current_y[[i,j]]) * delta_t;
             
             // PML damping, as above:
-            let pml_x_term = -sigma_y * Ex[[i, j]] + sigma_x * self.stencils.evaluate(&Bz_integral, i, j, &stencil::StencilType::GradY, &stencil::DifferenceType::Backward);
-            let pml_y_term = -sigma_x * Ey[[i, j]] - sigma_y * self.stencils.evaluate(&Bz_integral, i, j, &stencil::StencilType::GradX, &stencil::DifferenceType::Backward) ;
-            Ex[[i,j]] += pml_x_term*delta_t;
-            Ey[[i,j]] += pml_y_term*delta_t;
+            let pml_x_term = -sigma_y * elec_x[[i, j]] + sigma_x * self.stencils.evaluate(&mag_z_integral, i, j, &stencil::StencilType::GradY, &stencil::DifferenceType::Backward);
+            let pml_y_term = -sigma_x * elec_y[[i, j]] - sigma_y * self.stencils.evaluate(&mag_z_integral, i, j, &stencil::StencilType::GradX, &stencil::DifferenceType::Backward) ;
+            elec_x[[i,j]] += pml_x_term*delta_t;
+            elec_y[[i,j]] += pml_y_term*delta_t;
         }
 
     }
 }
 
 impl FieldConfiguration {
-    pub fn evaluate_E_grid_interpolated(&mut self, x: f64, y: f64) -> (f64, f64) {
+    pub fn evaluate_elec_interpolated(&mut self, x: f64, y: f64) -> (f64, f64) {
         self.ensure_initialized();
-        let Ex = evaluate_grid_interpolated_or_0(self, &self.Ex_grid, x, y);
-        let Ey = evaluate_grid_interpolated_or_0(self, &self.Ey_grid, x, y);
-        (Ex, Ey)
+        let elec_x = evaluate_grid_interpolated_or_0(self, &self.elec_x, x, y);
+        let elec_y = evaluate_grid_interpolated_or_0(self, &self.elec_y, x, y);
+        (elec_x, elec_y)
     }
 }
 
@@ -469,38 +384,35 @@ pub fn compute_potential_electrostatic_direct(field_configuration: &FieldConfigu
     potential
 }
 
-
+/// Generate a contour of the potential field starting at the specified point
 pub fn generate_potential_contours(field_configuration: &FieldConfiguration, x0: f64, y0: f64, level: f64, reverse_direction: bool) -> Vec<(f64, f64)> {
-    /// Generate a contour of the potential field starting at the specified point
     
-    let STEP_SIZE: f64 = if reverse_direction { -0.5 } else { 0.5 };
+    let step_size: f64 = if reverse_direction { -0.5 } else { 0.5 };
 
     const RETURN_EVERY: i32 = 10;
     const FINISH_TOLERANCE: f64 = 0.5;
-    const MAXIMUM_TRAVERSALS: i32 = 2;
     const MINIMUM_NUM_STEPS: i32 = 20;
 
     let mut x = x0;
     let mut y = y0;
     let mut contour: Vec<(f64, f64)> = vec![(x, y)];
     let mut step = 0;
-    
-    let mut needs_reversal = false; 
+
 
     loop {
         // predictor step...
         let Pair {u, v} = compute_field_electrostatic_direct(field_configuration, x, y);
         let r = (u * u + v * v).sqrt();
         
-        x -= STEP_SIZE * v / r;
-        y += STEP_SIZE * u / r;
+        x -= step_size * v / r;
+        y += step_size * u / r;
 
         // corrector step...
         let Pair {u:u1, v: v1} = compute_field_electrostatic_direct(field_configuration, x, y);
         let r1 = (u1 * u1 + v1 * v1).sqrt();
 
-        x -= STEP_SIZE * 0.5 * (v1 - v) / r1;
-        y += STEP_SIZE * 0.5 * (u1 - u) / r1;
+        x -= step_size * 0.5 * (v1 - v) / r1;
+        y += step_size * 0.5 * (u1 - u) / r1;
 
         step += 1;
 
@@ -529,8 +441,8 @@ pub fn generate_potential_contours(field_configuration: &FieldConfiguration, x0:
 }
 
 
+/// Find a nearby point to (x0, y0) at which the potential has the specified level
 pub fn find_crossing_point(field_configuration: &FieldConfiguration, level: f64, x0: f64, y0: f64) -> (f64, f64) {
-    /// Find a nearby point to (x0, y0) at which the potential has the specified level
     let mut x = x0;
     let mut y = y0;
     let mut potential = compute_potential_electrostatic_direct(field_configuration, x, y);
@@ -568,13 +480,7 @@ pub fn find_crossing_point(field_configuration: &FieldConfiguration, level: f64,
        
     } 
     let (mut x0, mut y0) = (x0, y0);
-    let (mut x1, mut y1) = (x, y);
-
-    let potential0 = compute_potential_electrostatic_direct(field_configuration, x0, y0);
-    let potential1 = compute_potential_electrostatic_direct(field_configuration, x1, y1);
-
-    // console::log_1(&format!("Found bisection range ({} {}):{} ({} {}):{} after {} steps", x0, y0, potential0, x1, y1, potential1, step).into());
-    
+    let (mut x1, mut y1) = (x, y);    
 
     // now do bisection search between (x0, y0) and (x1, y1) to find crossing point
     step = 0;
@@ -706,6 +612,6 @@ pub fn compute_field_magnetostatic_direct(field_configuration: &FieldConfigurati
 
 #[wasm_bindgen]
 pub fn compute_electric_field_dynamic(field_configuration: &mut FieldConfiguration, x: f64, y: f64) -> Pair {
-    let (u, v) = field_configuration.evaluate_E_grid_interpolated(x, y);
+    let (u, v) = field_configuration.evaluate_elec_interpolated(x, y);
     Pair { u, v }
 }
