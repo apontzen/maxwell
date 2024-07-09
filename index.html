@@ -83,9 +83,13 @@
             <option value="electrostatic_direct_fieldline">Electrostatic fieldlines [3D in-plane]</option>
             <option value="electrostatic_fourier">Electrostatic vectors [2D]</option>
             <option value="dynamic">Dynamic electric field [2D]</option>
-            <option value="magnetostatic_direct">Magentostatic</option>
+            <option value="magnetostatic_direct">Magentostatic vectors</option>
+            <option value="magnetostatic_direct_fieldline">Magentostatic fieldlines</option>
         </select>
-
+        <span id='show-potential-control'>
+            <label for="potential">Show potential:</label>
+            <input type="checkbox" id="potential">
+        </span>
         <button id="addPositiveCharge">Add Positive <span class="charge_or_current">Charge</span></button>
         <button id="addNegativeCharge">Add Negative <span class="charge_or_current">Charge</span></button>
         <!-- <label for="fieldStrength">Add field strength:</label>

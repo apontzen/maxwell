@@ -118,6 +118,7 @@ fn find_crossing_point(description: &ContouringCollection, level: f64, x0: f64, 
             return (x0, y0);
         }
         // try to overshoot the crossing point, then we'll bisect to find it exactly
+        // {u,v}_normed points down the potential gradient, and we want to move down if potential>level, up if potential<level
         x -= 1.5*(potential-level)*u_normed;
         y -= 1.5*(potential-level)*v_normed;
         potential = pot_calc(field_configuration, x, y);
@@ -156,15 +157,11 @@ fn find_crossing_point(description: &ContouringCollection, level: f64, x0: f64, 
     (x,y)
 }
 
-#[wasm_bindgen]
-pub fn generate_potential_contours_at_level(field_configuration: &FieldConfiguration, level: f64) -> JsValue {
-    /// Generate a contour at a specified level of the potential field
-        
+fn generate_contours_at_level(description: &ContouringCollection, level: f64) -> Vec<Vec<(f64, f64)>> {
     const MAX_CONTOURS: usize = 5;
 
-    let description  = ContouringCollection { potential_calculator: crate::compute_potential_electrostatic_direct,
-                                                            potential_gradient_calculator: crate::compute_field_electrostatic_direct,
-                                                            configuration: field_configuration};
+    let field_configuration = description.configuration;
+
     
     // First, scan over the grid to find all cells that cross the level
     let mut crossing_flags = Array2::<bool>::from_shape_fn((field_configuration.geometry.nx, field_configuration.geometry.ny), |(i, j)| {
@@ -218,10 +215,121 @@ pub fn generate_potential_contours_at_level(field_configuration: &FieldConfigura
 
 
     }
+    contours 
 
-    // web_sys::console::log_1(&format!("Found {} contours", contours.len()).into());
+}
+
+
+/// Generate a contour at a specified level of the electrostatic potential field
+#[wasm_bindgen]
+pub fn generate_potential_contours_at_level(field_configuration: &FieldConfiguration, level: f64) -> JsValue {
+    let description  = ContouringCollection { potential_calculator: crate::compute_potential_electrostatic_direct,
+        potential_gradient_calculator: crate::compute_field_electrostatic_direct,
+        configuration: field_configuration};
+
+    let contours = generate_contours_at_level(&description, level);
 
     to_value(&contours).unwrap()
+}
 
+fn line_crosses_symmetry(field_configuration: &FieldConfiguration, x0: f64, y0: f64, x1: f64, y1: f64) -> Option<Pair> {
 
+    let crosses_symmetry = |charge: &crate::Charge, other_charge: &crate::Charge| -> Option<Pair> {
+        let f = |x,y| {(x-charge.x)*(other_charge.y-charge.y) - (y-charge.y)*(other_charge.x-charge.x)};
+        let f0 = f(x0, y0);
+        let f1 = f(x1, y1);
+        if f0.signum() != f1.signum() {
+            let t = f0 / (f0 - f1);
+            let x = x0 + t * (x1 - x0);
+            let y = y0 + t * (y1 - y0);
+            Some(Pair {u: x, v: y})
+        } else {
+            None
+        }
+    };
+
+    if field_configuration.charges.len() == 1 {
+        // pretend there is another charge displaced to the right of the one charge
+        let charge = &field_configuration.charges[0];
+        let other_charge = crate::Charge {x: charge.x + 1.0, y: charge.y, charge: charge.charge};
+        return crosses_symmetry(charge, &other_charge);
+    }
+
+    let score_pair = |charge: &crate::Charge, other_charge: &crate::Charge| -> f64 {
+        let r_squared = ((charge.x - other_charge.x).powi(2) + (charge.y - other_charge.y).powi(2));
+        (1.3-charge.charge*other_charge.charge)/r_squared
+    };
+
+    let mut charge_already_paired: Vec<bool> = vec![false; field_configuration.charges.len()];
+
+    for i in 0..field_configuration.charges.len() {
+        if charge_already_paired[i]
+        {
+            continue;
+        }
+
+        let charge = &field_configuration.charges[i];
+        // find the highest-scoring other_charge:
+        let mut best_score = 0.0;
+        let mut best_other_charge = None;
+        let mut best_other_charge_index = 0;
+        for j in 0..field_configuration.charges.len() {
+            let other_charge = &field_configuration.charges[j];
+            if charge == other_charge || charge_already_paired[j] {
+                continue;
+            }
+            let score = score_pair(charge, other_charge);
+            if score > best_score {
+                best_score = score;
+                best_other_charge = Some(other_charge);
+                best_other_charge_index = j;
+            }
+        }
+
+        if best_other_charge.is_none() {
+            continue;
+        }
+
+        charge_already_paired[i] = true;
+        charge_already_paired[best_other_charge_index] = true;
+        
+        match crosses_symmetry(charge, best_other_charge.unwrap()) {
+            Some(pair) => return Some(pair),
+            None => (),
+        }
+            
+        
+    }
+
+    None
+}
+
+#[wasm_bindgen]
+pub fn generate_potential_contours_and_arrow_positions_at_level(field_configuration: &FieldConfiguration, level: f64) -> JsValue {
+    let description  = ContouringCollection { potential_calculator: crate::compute_potential_electrostatic_direct,
+        potential_gradient_calculator: crate::compute_field_electrostatic_direct,
+        configuration: field_configuration};
+
+    let contours = generate_contours_at_level(&description, level);
+    let mut arrows: Vec<(f64, f64)> = vec![];
+
+    let mut steps_until_another_arrow_allowed: usize = 0;
+    
+    for contour in &contours {
+        for ((x0, y0), (x1, y1)) in contour.iter().zip(contour.iter().skip(1)) {
+            if steps_until_another_arrow_allowed > 0 {
+                steps_until_another_arrow_allowed -= 1;
+                continue;
+            }
+            match line_crosses_symmetry(field_configuration, *x0, *y0, *x1, *y1) {
+                Some(Pair {u, v}) => { 
+                    steps_until_another_arrow_allowed = 10;
+                    arrows.push((u, v))
+                },
+                None => (),
+            }
+        }
+    }
+
+    to_value(&(contours, arrows)).unwrap()
 }

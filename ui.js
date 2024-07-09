@@ -1,7 +1,7 @@
 import init, { compute_field_electrostatic_direct, compute_field_magnetostatic_direct, 
     compute_electric_field_dynamic, init_panic_hook, FieldConfiguration } from './maxwell/out/maxwell.js';
 
-import { drawfieldlinePlot, drawPotentialContour } from './fieldline.js';
+import { drawElectrostaticFieldLines, drawPotentialContour } from './fieldline.js';
 
 export const chargeSize = 10;
 
@@ -76,6 +76,8 @@ export async function main() {
     let plotType = 'quiver';
 
     function updateSolverType() {
+        let allowPotential = false;
+
         // get value of solver
         const solverType = document.getElementById('solver').value;
         
@@ -83,21 +85,31 @@ export async function main() {
 
         plotType = 'quiver';
 
+        if (solverType.endsWith('_fieldline')) {
+            plotType = 'fieldline';
+        }
+
         if (solverType === 'electrostatic_direct' || solverType === 'electrostatic_direct_fieldline') {
             updateChargeOrCurrentLabel('Charge');
-            if(solverType === 'electrostatic_direct_fieldline')
-                plotType = 'fieldline';
             computeField = compute_field_electrostatic_direct;
+            allowPotential = true;
         } else if (solverType === 'electrostatic_fourier' || solverType === 'dynamic') {
             updateChargeOrCurrentLabel('Charge');
             computeField = compute_electric_field_dynamic;
-        } else if (solverType === 'magnetostatic_direct') { 
+        } else if (solverType === 'magnetostatic_direct' || solverType === 'magnetostatic_direct_fieldline') { 
             updateChargeOrCurrentLabel('Current');
             computeField = compute_field_magnetostatic_direct;
         } else {
             console.error('Unknown solver type');
         }
         field = new FieldConfiguration(rect.width, rect.height, cic_resolution, cic_resolution);
+
+        console.log("allowPotential", allowPotential);
+        if(allowPotential) {
+            document.getElementById('show-potential-control').style.display = 'inline';
+        } else {
+            document.getElementById('show-potential-control').style.display = 'none';
+        }
     }
 
     updateSolverType();
@@ -114,6 +126,10 @@ export async function main() {
         drawVectorField();
         if(dynamic)
             animation_request_id = window.requestAnimationFrame(tickField);
+    });
+
+    document.getElementById('potential').addEventListener('change', () => {
+        drawVectorField();
     });
 
     function tickField(time_now) {
@@ -159,7 +175,7 @@ export async function main() {
 
         const x0 = 200.0;
         const y0 = 200.0;
-        if (charges.length > 0) {
+        if (charges.length > 0 && computeField === compute_field_electrostatic_direct && document.getElementById('potential').checked) {
             drawPotentialContour(field, 0, ctx, 'grey');
             drawPotentialContour(field, 125, ctx, 'blue');
             drawPotentialContour(field, 250, ctx, 'blue');
@@ -176,7 +192,22 @@ export async function main() {
             const vectors = generateVectors();
             drawQuiverPlot(vectors);
         } else if (plotType === 'fieldline') {
-            drawfieldlinePlot(charges, field, ctx, rect, chargeSize);
+            if(computeField === compute_field_electrostatic_direct) {
+                // The following algorithm only works when field lines start and end on charges, so perfect for the
+                // electric case but not the magnetic case
+                drawElectrostaticFieldLines(charges, field, ctx, rect, chargeSize);
+            } else if (computeField === compute_field_magnetostatic_direct) {
+                // Here we take cheeky advantage of the fact that the magnetostatic field lines are equivalent to
+                // equipotential lines if we were solving an electrostatic problem. 
+                for (let level=0; level<1000; level+=250) {
+                    drawPotentialContour(field, level, ctx, 'black', true);
+                    if(level>0)
+                        drawPotentialContour(field, -level, ctx, 'black', true);
+                }
+
+            } else {
+                console.error('Fieldlines not supported for this solver');
+            }
         }
 
         drawChargesOrCurrents();

@@ -1,4 +1,4 @@
-import { compute_field_electrostatic_direct, generate_potential_contours_at_level } from './maxwell/out/maxwell.js';
+import { compute_field_electrostatic_direct, generate_potential_contours_at_level, generate_potential_contours_and_arrow_positions_at_level, compute_field_magnetostatic_direct } from './maxwell/out/maxwell.js';
 import { getChargeFromPoint, chargeSize } from './ui.js';
 
 class StreamDepartures {
@@ -92,7 +92,7 @@ function fieldlineStartingAngles(charges) {
     }
 }
 
-export function drawfieldlinePlot(charges, field, ctx, rect, chargeSize) {
+export function drawElectrostaticFieldLines(charges, field, ctx, rect, chargeSize) {
 
     fieldlineStartingAngles(charges);
     let departures_all_charges = charges.map(charge => 
@@ -215,29 +215,38 @@ export function drawfieldlinePlot(charges, field, ctx, rect, chargeSize) {
             stream_y = y_steps[Math.round(y_steps.length/2)];
 
             const E = compute_field_electrostatic_direct(field, stream_x, stream_y);
-            const u = E.u;
-            const v = E.v;
-            ctx.save();
-            ctx.translate(stream_x, stream_y);
-            ctx.rotate(Math.atan2(v, u));
-            ctx.beginPath();
-            ctx.moveTo(-8, -5);
-            ctx.lineTo(0, 0);
-            ctx.lineTo(-8, 5);
-            //ctx.closePath();
-            //ctx.fillStyle = 'black';
-            //ctx.fill();
-            ctx.stroke();
-            ctx.restore();
-            
+            drawDirectionArrow(stream_x, stream_y, E.u, E.v, ctx);            
         }
 
     }        
 }
 
+function drawDirectionArrow(x_position, y_position, u, v, ctx) {
+    ctx.save();
+    ctx.translate(x_position, y_position);
+    ctx.rotate(Math.atan2(v, u));
+    ctx.beginPath();
+    ctx.moveTo(-8, -5);
+    ctx.lineTo(0, 0);
+    ctx.lineTo(-8, 5);
+    ctx.stroke();
+    ctx.restore();
+}
 
-export function drawPotentialContour(charges, level, ctx, color) {
-    let contours = generate_potential_contours_at_level(charges, level);
+
+export function drawPotentialContour(charges, level, ctx, color, show_direction = false) {
+    let contours;
+    if (show_direction) {
+        let arrows;
+        [contours, arrows] = generate_potential_contours_and_arrow_positions_at_level(charges, level);
+        for (let arrow of arrows) {
+            const [x, y] = arrow;
+            const B = compute_field_magnetostatic_direct(charges, x, y);
+            drawDirectionArrow(x, y, B.u, B.v, ctx);
+        }
+    } else {
+        contours = generate_potential_contours_at_level(charges, level);
+    }
 
     for (let contour of contours) {
         ctx.strokeStyle = color;
@@ -253,5 +262,6 @@ export function drawPotentialContour(charges, level, ctx, color) {
         }
         ctx.stroke();
     }
+
 
 }
