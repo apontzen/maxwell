@@ -1,7 +1,7 @@
 import init, { compute_field_electrostatic_direct, compute_field_magnetostatic_direct, 
     compute_electric_field_dynamic, init_panic_hook, FieldConfiguration } from './maxwell/out/maxwell.js';
 
-import { drawElectrostaticFieldLines, drawPotentialContour } from './fieldline.js';
+import { drawElectrostaticFieldLines, drawPotentialContours } from './fieldline.js';
 
 export const chargeSize = 10;
 
@@ -55,8 +55,6 @@ export async function main() {
     // Store the original CSS dimensions.
     const rect = canvas.getBoundingClientRect();
 
-    console.log(rect.width, rect.height);
-
     // Give the canvas pixel dimensions of their CSS
     // size * the device pixel ratio.
     canvas.width = rect.width * dpr;
@@ -106,7 +104,6 @@ export async function main() {
         }
         field = new FieldConfiguration(rect.width, rect.height, cic_resolution, cic_resolution);
 
-        console.log("allowPotential", allowPotential);
         if(allowPotential) {
             document.getElementById('show-potential-control').style.display = 'inline';
         } else {
@@ -178,16 +175,11 @@ export async function main() {
         const x0 = 200.0;
         const y0 = 200.0;
         if (charges.length > 0 && computeField === compute_field_electrostatic_direct && document.getElementById('potential').checked) {
-            drawPotentialContour(field, 0, ctx, 'grey');
-            drawPotentialContour(field, 125, ctx, 'blue');
-            drawPotentialContour(field, 250, ctx, 'blue');
-            drawPotentialContour(field, 500, ctx, 'blue');
-            drawPotentialContour(field, 1000, ctx, 'blue');
+            drawPotentialContours(field, [0], ctx, 'grey');
 
-            drawPotentialContour(field, -125, ctx, 'red');
-            drawPotentialContour(field, -250, ctx, 'red');
-            drawPotentialContour(field, -500, ctx, 'red');
-            drawPotentialContour(field, -1000, ctx, 'red');
+            drawPotentialContours(field, [125., 250., 500., 1000.], ctx, 'blue');
+            
+            drawPotentialContours(field, [-125., -250., -500., -1000.], ctx, 'red');
         }
 
         if (plotType === 'quiver') {
@@ -201,13 +193,13 @@ export async function main() {
             } else if (computeField === compute_field_magnetostatic_direct) {
                 // Here we take cheeky advantage of the fact that the magnetostatic field lines are equivalent to
                 // equipotential lines if we were solving an electrostatic problem. 
-                for (let level=0; level<1500; level+=125) {
-                    drawPotentialContour(field, level, ctx, 'black', true);
-                    if(level>0)
-                        drawPotentialContour(field, -level, ctx, 'black', true);
+                const rangeValues = [];
+                for (let i = 1.4; i <= 4.0; i += 0.4) {
+                    rangeValues.push(10**i);
+                    rangeValues.push(-(10**i));
                 }
-                drawPotentialContour(field, 20, ctx, 'black', true);
-                drawPotentialContour(field, -20, ctx, 'black', true);
+                rangeValues.push(0.0);
+                drawPotentialContours(field, rangeValues, ctx, 'black', true);
 
             } else {
                 console.error('Fieldlines not supported for this solver');
@@ -284,10 +276,12 @@ export async function main() {
     }
 
     const chargeInput = document.getElementById('charge');
+    const chargeValue = document.getElementById('chargeValue');
     let selectedCharge = null;
 
     chargeInput.addEventListener('input', () => {
         selectedCharge.charge = parseInt(chargeInput.value);
+        chargeValue.textContent = chargeInput.value;
         drawVectorField();
     });
 
@@ -307,6 +301,7 @@ export async function main() {
     function selectCharge(charge) {
 
         chargeInput.value = charge.charge;
+        chargeValue.textContent = chargeInput.value;
         selectedCharge = charge;
 
         drawVectorField();
@@ -476,10 +471,8 @@ export async function main() {
     }
 
     function mouseOrTouchDown(event) {
-        console.log(event);
         deselectCharge();
         draggingCharge = getChargeFromEvent(event);
-        console.log("dragging charge", draggingCharge);
         if (draggingCharge) {
             event.preventDefault();
             const { offsetX, offsetY } = coordinatesFromMouseOrTouch(event);

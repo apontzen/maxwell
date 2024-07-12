@@ -161,40 +161,55 @@ fn find_crossing_point(description: &ContouringCollection, level: f64, x0: f64, 
     (x,y)
 }
 
-fn generate_contours_at_level(description: &ContouringCollection, level: f64) -> Vec<Vec<(f64, f64)>> {
-    const MAX_CONTOURS: usize = 5;
+fn generate_contours_at_levels(description: &ContouringCollection, levels: Vec<f64>) -> Vec<Vec<(f64, f64)>> {
+    const MAX_CONTOURS: usize = 50;
+    const NO_CHANGE: f64 = f64::INFINITY;
 
     let field_configuration = description.configuration;
 
     
     // First, scan over the grid to find all cells that cross the level
-    let mut crossing_flags = Array2::<bool>::from_shape_fn((field_configuration.geometry.nx, field_configuration.geometry.ny), |(i, j)| {
-        let change_in_cell = field_configuration.geometry.cell_to_corners(i, j).
+    let mut crossing_level = Array2::<f64>::from_shape_fn((field_configuration.geometry.nx, field_configuration.geometry.ny), |(i, j)| {
+        let potential_in_corners = field_configuration.geometry.cell_to_corners(i, j).
             iter().
-            any(|(x, y)| (description.potential_calculator)(field_configuration, *x, *y) > level) !=
-            field_configuration.geometry.cell_to_corners(i, j).
-            iter().
-            all(|(x, y)| (description.potential_calculator)(field_configuration, *x, *y) > level);
+            map(|(x, y)| (description.potential_calculator)(field_configuration, *x, *y)).
+            collect::<Vec<f64>>();
 
-        change_in_cell
+        for level in &levels {
+            let change_in_cell = potential_in_corners.iter().
+                any(|&potential| potential > *level) !=
+                potential_in_corners.iter().
+                all(|&potential| potential > *level);
+                
+            if change_in_cell {
+                return *level;
+            }
+        }
+        NO_CHANGE
     });
 
     let mut contours : Vec<Vec<(f64, f64)>> = vec![];
 
     loop {
         if contours.len() >= MAX_CONTOURS {
-            console::log_1(&format!("Ran out of contours for {}",level).into());
+            console::log_1(&format!("Ran out of contours").into());
             break;
         }
 
 
         // Find the first cell that crosses the level
-        let (i, j) = match (0..field_configuration.geometry.nx).flat_map(|i| (0..field_configuration.geometry.ny).map(move |j| (i, j))).find(|(i, j)| crossing_flags[[*i, *j]]) {
-            Some((i, j)) => (i, j),
-            None => break,
-        };
+        let (i, j) = match (0..field_configuration.geometry.nx).
+             flat_map(|i| (0..field_configuration.geometry.ny).
+             map(move |j| (i, j))).
+             find(|(i, j)| crossing_level[[*i, *j]]!=NO_CHANGE) 
+             {
+                Some((i, j)) => (i, j),
+                None => break,
+             };
 
-        crossing_flags[[i, j]] = false;
+        let level = crossing_level[[i, j]];
+
+        crossing_level[[i, j]] = NO_CHANGE;
 
         // Now follow the contour from this cell
         let (mut x, mut y) = field_configuration.geometry.cell_to_centroid(i, j);
@@ -205,8 +220,7 @@ fn generate_contours_at_level(description: &ContouringCollection, level: f64) ->
 
         
         // console::log_1(&format!("Distance to closest charge: {}", distance_to_closest).into());
-        if distance_to_closest < 40. {
-            // too close, not interested
+        if distance_to_closest < 10. {
             continue;
         }
         
@@ -219,7 +233,11 @@ fn generate_contours_at_level(description: &ContouringCollection, level: f64) ->
         // unflag cells that have been visited by this contour
         contour.iter().for_each(|(x, y)| {
             field_configuration.geometry.position_to_surrounding_cells(*x, *y).iter().for_each(
-                |(it, jt)| { crossing_flags[[*it,*jt]] = false; }
+                |(it, jt)| { 
+                    if crossing_level[[*it,*jt]]==level { 
+                        crossing_level[[*it,*jt]] = NO_CHANGE; 
+                    }
+                }
             );
         });
 
@@ -235,12 +253,12 @@ fn generate_contours_at_level(description: &ContouringCollection, level: f64) ->
 
 /// Generate a contour at a specified level of the electrostatic potential field
 #[wasm_bindgen]
-pub fn generate_potential_contours_at_level(field_configuration: &FieldConfiguration, level: f64) -> JsValue {
+pub fn generate_potential_contours_at_levels(field_configuration: &FieldConfiguration, levels: Vec<f64>) -> JsValue {
     let description  = ContouringCollection { potential_calculator: crate::compute_potential_electrostatic_direct,
         potential_gradient_calculator: crate::compute_field_electrostatic_direct,
         configuration: field_configuration};
 
-    let contours = generate_contours_at_level(&description, level);
+    let contours = generate_contours_at_levels(&description, levels);
 
     to_value(&contours).unwrap()
 }
@@ -318,12 +336,12 @@ fn line_crosses_symmetry(field_configuration: &FieldConfiguration, x0: f64, y0: 
 }
 
 #[wasm_bindgen]
-pub fn generate_potential_contours_and_arrow_positions_at_level(field_configuration: &FieldConfiguration, level: f64) -> JsValue {
+pub fn generate_potential_contours_and_arrow_positions_at_levels(field_configuration: &FieldConfiguration, levels: Vec<f64>) -> JsValue {
     let description  = ContouringCollection { potential_calculator: crate::compute_potential_electrostatic_direct,
         potential_gradient_calculator: crate::compute_field_electrostatic_direct,
         configuration: field_configuration};
 
-    let contours = generate_contours_at_level(&description, level);
+    let contours = generate_contours_at_levels(&description, levels);
     let mut arrows: Vec<(f64, f64)> = vec![];
 
     let mut steps_until_another_arrow_allowed: usize = 0;

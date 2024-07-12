@@ -1,4 +1,4 @@
-import { compute_field_electrostatic_direct, generate_potential_contours_at_level, generate_potential_contours_and_arrow_positions_at_level, compute_field_magnetostatic_direct } from './maxwell/out/maxwell.js';
+import { compute_field_electrostatic_direct, generate_potential_contours_at_levels, generate_potential_contours_and_arrow_positions_at_levels, compute_field_magnetostatic_direct } from './maxwell/out/maxwell.js';
 import { getChargeFromPoint, chargeSize } from './ui.js';
 
 class StreamDepartures {
@@ -234,18 +234,18 @@ function drawDirectionArrow(x_position, y_position, u, v, ctx) {
 }
 
 
-export function drawPotentialContour(charges, level, ctx, color, show_direction = false) {
+export function drawPotentialContours(charges, levels, ctx, color, show_direction = false) {
     let contours;
     if (show_direction) {
         let arrows;
-        [contours, arrows] = generate_potential_contours_and_arrow_positions_at_level(charges, level);
+        [contours, arrows] = generate_potential_contours_and_arrow_positions_at_levels(charges, levels);
         for (let arrow of arrows) {
             const [x, y] = arrow;
             const B = compute_field_magnetostatic_direct(charges, x, y);
             drawDirectionArrow(x, y, B.u, B.v, ctx);
         }
     } else {
-        contours = generate_potential_contours_at_level(charges, level);
+        contours = generate_potential_contours_at_levels(charges, levels);
     }
 
     for (let contour of contours) {
