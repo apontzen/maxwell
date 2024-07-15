@@ -131,6 +131,75 @@ export async function main() {
         drawVectorField();
     });
 
+    function stateToJson() {
+        let charges_normalized_coordinates = charges.map(charge => {
+            const normalizedX = charge.x / rect.width;
+            const normalizedY = charge.y / rect.height;
+            return { ...charge, x: normalizedX, y: normalizedY };
+        });
+
+        return JSON.stringify({
+            charges: charges_normalized_coordinates,
+            solver: document.getElementById('solver').value,
+            show_potential: document.getElementById('potential').checked
+        });
+    }
+
+    function jsonToState(str) {
+        const state = JSON.parse(str);
+        if (state) {
+            charges = state.charges.map(charge => {
+                const scaledX = charge.x * rect.width;
+                const scaledY = charge.y * rect.height;
+                return {...charge, x: scaledX, y: scaledY};
+            });
+
+            document.getElementById('solver').value = state.solver;
+            document.getElementById('potential').checked = state.show_potential;
+            updateSolverType();
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    function updateDisplayedJson() {
+        document.getElementById('jsonDescription').value = stateToJson();
+    }
+
+    document.getElementById('loadJson').addEventListener('click', () => {
+        const json = document.getElementById('jsonDescription').value;
+        jsonToState(json);
+        drawVectorField();
+    });
+
+    document.getElementById('copyJson').addEventListener('click', () => {
+        const json = document.getElementById('jsonDescription').value;
+        navigator.clipboard.writeText(json);
+    });
+
+    document.getElementById('pasteJson').addEventListener('click', async () => {
+        const json = await navigator.clipboard.readText();
+        console.log("paste", json);
+        if(jsonToState(json)) {
+            document.getElementById('jsonDescription').value = json;
+            drawVectorField();
+        }
+    });
+
+    // Load the state from local storage if it exists
+    const savedState = localStorage.getItem('maxwell_state');
+    if (savedState) {
+        jsonToState(savedState);
+    }
+
+    // Save the state to local storage whenever it changes
+    function saveState() {
+        const state = stateToJson();
+        localStorage.setItem('maxwell_state', state);
+    }
+
+
     function tickField(time_now) {
         animation_request_id = null;
 
@@ -154,7 +223,7 @@ export async function main() {
         }
  
         last_time = time_now;
-        drawVectorField();
+        drawVectorField(false);
  
 
         // only request the next frame if we're still solving dynamically
@@ -163,7 +232,12 @@ export async function main() {
 
     }
 
-    function drawVectorField() {
+    function drawVectorField(user_update = true) {
+        if(user_update) {
+            updateDisplayedJson();
+            saveState();
+        }
+
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
         field.set_charges(charges);

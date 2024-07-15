@@ -72,6 +72,14 @@
             font-size: 0.8em;
         }
 
+        .json-input {
+            padding-top: 20px;
+        }
+
+        .json-input textarea {
+            font: fixed;
+        }
+
     </style>
 </head>
 <body>
@@ -102,6 +110,11 @@
         <button id="deleteCharge">Delete <span class="charge_or_current">Charge</span></button>
     </div>
     <canvas id="vectorFieldCanvas" width="800" height="600"></canvas>
+    <div class="json-input"></div>
+        <label for="jsonDescription">JSON Description:</label>
+        <textarea id="jsonDescription" rows="5" cols="80"></textarea>
+        <button id="loadJson">Update</button><button id="copyJson">Copy</button><button id="pasteJson">Paste</button>
+    </div>
 
     <script src="./ui.js" type="module"></script>
 
