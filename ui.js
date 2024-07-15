@@ -485,8 +485,11 @@ export async function main() {
         });
     }
 
+    let charge_id = 0;
+
     function addCharge(x, y, charge) {
-        charges.push({x, y, charge});
+        charges.push({x, y, charge, id: charge_id});
+        charge_id++;
         deselectCharge();
         field.set_charges(charges);
         drawVectorField();

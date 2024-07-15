@@ -1,14 +1,102 @@
 import { compute_field_electrostatic_direct, generate_potential_contours_at_levels, generate_potential_contours_and_arrow_positions_at_levels, compute_field_magnetostatic_direct } from './maxwell/out/maxwell.js';
 import { getChargeFromPoint, chargeSize } from './ui.js';
 
-class StreamDepartures {
+class MultiStreamDepartures {
     constructor(num_departures, starting_angle = 0) {
         this.num_departures = num_departures;
         this.next_departure_index = 0;
         this.starting_angle = starting_angle;
-        this.ending_angle = starting_angle + 2*Math.PI;
-        this.restricted_angle = false;
-        this.arrivals = new Array();
+        this.arrival_range = {};
+        this.arrivals = {}
+
+    }
+
+    get_new_departure_no_arrivals(departure_index_interleaved) {
+        return this.starting_angle + (departure_index_interleaved+0.5) * 2*Math.PI / this.num_departures;
+    }
+
+    get_new_departure_with_arrivals(departure_index_interleaved) {
+        let logical_angle = (departure_index_interleaved+0.5)/this.num_departures;
+
+
+        // now the space available for actually launching streamlines is the space left after
+        // excluding all arrival ranges. To complicate matters, the arrival_ranges may overlap, and
+        // may also wrap around the 2 pi interval. So we need to find all the spaces left after 
+        // excluding the arrival ranges, with these two complications in mind.
+        let available_ranges = [{start: 0, end: 2*Math.PI}];
+        let exclusion_ranges = []
+
+        // step 1: if any exclusion range wraps around, turn it into two exclusion ranges
+        for (let [, [exclusion_start, exclusion_end]] of Object.entries(this.arrival_range)) {
+            if (exclusion_start<=exclusion_end) {
+                exclusion_ranges.push([exclusion_start, exclusion_end]);
+            } else {
+                exclusion_ranges.push([0, exclusion_end]);
+                exclusion_ranges.push([exclusion_start, 2*Math.PI]);
+            }
+        }
+
+        // step 2: iteratively break launch ranges into smaller ranges by excluding the exclusion ranges
+        for (let [exclusion_start, exclusion_end] of exclusion_ranges) {
+            if (exclusion_start == exclusion_end) {
+                continue;
+            }
+            let new_ranges = [];
+            for (let range of available_ranges) { 
+                if (range.start<exclusion_start && range.end>exclusion_start) {
+                    new_ranges.push({start: range.start, end: exclusion_start});
+                }
+                if (range.end>exclusion_end && range.start<exclusion_end) {
+                    new_ranges.push({start: exclusion_end, end: range.end});
+                }
+                if ((exclusion_start<range.start && exclusion_end<range.start) 
+                    || (exclusion_start>range.end && exclusion_end>range.end)) {
+                    new_ranges.push(range);
+                }
+            }
+            available_ranges = new_ranges;
+        }
+        console.log("prohibited:",exclusion_ranges);
+        console.log("available:",available_ranges);
+        console.log("offset:",this.starting_angle);
+
+        
+        
+        // Now map the logical angle (0 to 1) into the actual angle space available:
+        let total_available_range = 0;
+        for (let range of available_ranges) {
+            total_available_range += range.end - range.start;
+        }
+
+        let num_departure_per_range = available_ranges.map(
+            range => Math.round(this.num_departures*(range.end - range.start)/total_available_range)
+        );
+
+        // if sum(num_departure_per_range) is less than num_departures, add one to the first
+        // range 
+        let num_departure_per_range_sum = num_departure_per_range.reduce((a, b) => a + b, 0);
+        if (num_departure_per_range_sum < this.num_departures) {
+            num_departure_per_range[0]+=this.num_departures - num_departure_per_range_sum;
+        }
+
+        let index_within_range = departure_index_interleaved;
+        let range_index = 0;
+        while (index_within_range >= num_departure_per_range[range_index]) {
+            index_within_range -= num_departure_per_range[range_index];
+            range_index++;
+        }
+        
+
+        console.log("num_departure_per_range:", num_departure_per_range);
+        console.log("index_within_range:", index_within_range);
+        console.log("range_index:", range_index);
+
+        let range_min = available_ranges[range_index].start;
+        let range_max = available_ranges[range_index].end;
+        let angle = range_min + (range_max - range_min) * (index_within_range + 0.5) / num_departure_per_range[range_index];
+
+        return angle;
+ 
     }
 
     get_new_departure() {
@@ -24,26 +112,22 @@ class StreamDepartures {
         // streamlines don't bunch up around that end.
         const departure_index_interleaved = (departure_index%2==0)?(departure_index/2):(this.num_departures - 1 - (departure_index-1)/2);
 
-        if (this.restricted_angle) {
-            angle = this.starting_angle + (departure_index_interleaved+1) * (this.ending_angle - this.starting_angle) / (this.num_departures + 1);
+        const restricted_angle = Object.keys(this.arrival_range).length > 0;
+
+        if (restricted_angle) {
+            angle = this.get_new_departure_with_arrivals(departure_index_interleaved);
         } else {
-            angle = this.starting_angle + (departure_index_interleaved+0.5) * (this.ending_angle - this.starting_angle) / (this.num_departures );
+            angle = this.get_new_departure_no_arrivals(departure_index_interleaved);
         }
+
         this.next_departure_index++;
-        return angle%(2*Math.PI);
+
+        return angle;
     }
 
-    
-
-    register_arrival(angle) {
-        this.arrivals.push((angle+2*Math.PI)%(2*Math.PI));
-        if (this.num_departures > 0)
-            this.num_departures--;
-
-        this.restricted_angle = this.arrivals.length > 1;
-
-        let min_angle = Math.min(...this.arrivals);
-        let max_angle = Math.max(...this.arrivals);
+    arrivals_to_range(arrivals) {
+        let min_angle = Math.min(...arrivals);
+        let max_angle = Math.max(...arrivals);
         let angle_range = max_angle - min_angle;
 
 
@@ -52,7 +136,7 @@ class StreamDepartures {
         // between 6.1 and 0.1 + 2 pi. Test for this condition and choose the best way
         // to express the interval
         for (let offset = 1; offset<4; offset++) {
-            const arrivals_wrapped = this.arrivals.map(a => (a + offset * Math.PI/2)%(2*Math.PI) - offset * Math.PI/2);
+            const arrivals_wrapped = arrivals.map(a => (a + offset * Math.PI/2)%(2*Math.PI) - offset * Math.PI/2);
             const min_angle_wrapped = Math.min(...arrivals_wrapped);
             const max_angle_wrapped = Math.max(...arrivals_wrapped);
             const offset_range = max_angle_wrapped - min_angle_wrapped;
@@ -64,12 +148,30 @@ class StreamDepartures {
 
         }
 
-        this.starting_angle = max_angle;
-        this.ending_angle = min_angle+2*Math.PI;
+        console.log("min_angle:", min_angle, "max_angle:", max_angle, "angle_range:", angle_range);
+        
+        min_angle+=2*Math.PI;
+        max_angle+=2*Math.PI;
 
+        min_angle = min_angle%(2*Math.PI);
+        max_angle = max_angle%(2*Math.PI);
+
+        return [min_angle, max_angle];
     }
 
-    
+    register_arrival(angle, source) {
+        angle = (angle + 2*Math.PI)%(2*Math.PI);
+        console.log("registering arrival from", source, "at angle", angle);
+        this.num_departures--;
+        if (!(source in this.arrivals)) {
+            this.arrivals[source] = [];
+        }
+        this.arrivals[source].push(angle);
+
+        this.arrival_range[source] = this.arrivals_to_range(this.arrivals[source]);
+        console.log("arrivals:", this.arrivals[source], "range:", this.arrival_range[source]);
+        
+    }
 }
 
 function fieldlineStartingAngles(charges) {
@@ -96,7 +198,7 @@ export function drawElectrostaticFieldLines(charges, field, ctx, rect, chargeSiz
 
     fieldlineStartingAngles(charges);
     let departures_all_charges = charges.map(charge => 
-        ({charge: charge, departures: new StreamDepartures(Math.abs(charge.charge) * 4,
+        ({charge: charge, departures: new MultiStreamDepartures(Math.abs(charge.charge) * 4,
                                                            charge.angle)}));
 
     // sort departures_all_charges by charge magnitude in ascending order
@@ -106,13 +208,18 @@ export function drawElectrostaticFieldLines(charges, field, ctx, rect, chargeSiz
     for (let {charge, departures} of departures_all_charges) {
         const x = charge.x;
         const y = charge.y;
+        
+        console.log("PROCESS CHARGE:",charge);
 
         let num_failed_launches = 0;
         const max_failed_launches = 20;
 
         while(true) {
+            
             const stream_angle = departures.get_new_departure();
             if (stream_angle === null) break;
+
+            console.log("Departure number", departures.next_departure_index, "of", departures.num_departures, "angle:", stream_angle);
 
             let stream_x = x + chargeSize * Math.cos(stream_angle);
             let stream_y = y + chargeSize * Math.sin(stream_angle);
@@ -178,6 +285,8 @@ export function drawElectrostaticFieldLines(charges, field, ctx, rect, chargeSiz
 
 
             let landed_charge = getChargeFromPoint(charges, stream_x, stream_y);
+
+            console.log("landed", landed_charge, "at", stream_x, stream_y)
             if (landed_charge !== null) {
                 
                 // the arrival at another charge needs to be registered so that we don't over-launch
@@ -193,13 +302,13 @@ export function drawElectrostaticFieldLines(charges, field, ctx, rect, chargeSiz
                     } else {
                         console.log("Failed streamline launch. Backtracking.");
                         departures.next_departure_index--;
-                        departures.register_arrival(stream_angle);
+                        departures.register_arrival(stream_angle, landed_charge.id);
                         departures.num_departures++;
                         continue;
                     }
 
                 } else {
-                    arrived_at.register_arrival(angle);
+                    arrived_at.register_arrival(angle, charge.id);
                 }
             }
 
