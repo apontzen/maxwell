@@ -74,6 +74,7 @@
 
         .json-input {
             padding-top: 20px;
+            display: none;
         }
 
         .json-input textarea {
@@ -98,8 +99,8 @@
             <label for="potential">Show potential:</label>
             <input type="checkbox" id="potential">
         </span>
-        <button id="addPositiveCharge">Add Positive <span class="charge_or_current">Charge</span></button>
-        <button id="addNegativeCharge">Add Negative <span class="charge_or_current">Charge</span></button>
+        <button id="addPositiveCharge">Add <span class="charge_or_current">Charge</span></button>
+        <button id="clearCharges">Clear</button>
         <!-- <label for="fieldStrength">Add field strength:</label>
         <input type="range" id="fieldStrength" min="-10" max="10" value="0">-->
     </div>
@@ -110,10 +111,14 @@
         <button id="deleteCharge">Delete <span class="charge_or_current">Charge</span></button>
     </div>
     <canvas id="vectorFieldCanvas" width="800" height="600"></canvas>
-    <div class="json-input"></div>
-        <label for="jsonDescription">JSON Description:</label>
+    <div class="json-input">
         <textarea id="jsonDescription" rows="5" cols="80"></textarea>
-        <button id="loadJson">Update</button><button id="copyJson">Copy</button><button id="pasteJson">Paste</button>
+    </div>
+    <div class="controls">
+        <!-- <button id="loadJson">Update</button>--> 
+        <label for="copyJson">JSON description:</label>
+        <button id="copyJson">Copy</button>
+        <button id="pasteJson">Paste</button>
     </div>
 
     <script src="./ui.js" type="module"></script>

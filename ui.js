@@ -29,10 +29,8 @@ export async function main() {
     const canvas = document.getElementById('vectorFieldCanvas');
     const ctx = canvas.getContext('2d');
     const addPositiveChargeBtn = document.getElementById('addPositiveCharge');
-    const addNegativeChargeBtn = document.getElementById('addNegativeCharge');
-    // const fieldStrength = document.getElementById('fieldStrength');
+    const clearChargesBtn = document.getElementById('clearCharges');
 
-    
     const maxArrowLength = 40;
 
     let charges = [];
@@ -167,11 +165,12 @@ export async function main() {
         document.getElementById('jsonDescription').value = stateToJson();
     }
 
+    /*
     document.getElementById('loadJson').addEventListener('click', () => {
         const json = document.getElementById('jsonDescription').value;
         jsonToState(json);
         drawVectorField();
-    });
+    });*/
 
     document.getElementById('copyJson').addEventListener('click', () => {
         const json = document.getElementById('jsonDescription').value;
@@ -614,15 +613,15 @@ export async function main() {
         addCharge(canvas.width / (2*dpr), canvas.height / (2*dpr), 1);
     });
 
-    addNegativeChargeBtn.addEventListener('click', () => {
-        addCharge(canvas.width / (2*dpr), canvas.height / (2*dpr), -1);
+    clearChargesBtn.addEventListener('click', () => {
+        charges = [];
+        deselectCharge();
+        drawVectorField();
     });
 
     /*
-    fieldStrength.addEventListener('input', () => {
-        const strength = parseFloat(fieldStrength.value);
-        field.set_ey_field_strength(strength);
-        drawVectorField();
+    addNegativeChargeBtn.addEventListener('click', () => {
+        addCharge(canvas.width / (2*dpr), canvas.height / (2*dpr), -1);
     });
     */
 
