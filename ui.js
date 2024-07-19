@@ -261,10 +261,12 @@ export async function main(params) {
     
     let selectedCharge = null;
 
+    let chargeInput, chargeValue, deleteChargeBtn;
+
     if(chargePropertiesDiv!==null) {
-        const chargeInput = chargePropertiesDiv.querySelector('.charge');
-        const chargeValue = chargePropertiesDiv.querySelector('.chargeValue');
-        const deleteChargeBtn = chargePropertiesDiv.querySelector('.deleteCharge');
+        chargeInput = chargePropertiesDiv.querySelector('.charge');
+        chargeValue = chargePropertiesDiv.querySelector('.chargeValue');
+        deleteChargeBtn = chargePropertiesDiv.querySelector('.deleteCharge');
 
         chargeInput.addEventListener('input', () => {
             selectedCharge.charge = parseInt(chargeInput.value);
