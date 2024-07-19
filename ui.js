@@ -104,6 +104,9 @@ export async function main(params) {
                 potentialControlsDiv.style.display = 'none';
             }
         }
+
+        if(dynamic)
+            animation_request_id = window.requestAnimationFrame(tickField);
     }
 
     updateSolverType();
@@ -119,8 +122,6 @@ export async function main(params) {
             last_time = null;
             updateSolverType();
             drawVectorField();
-            if(dynamic)
-                animation_request_id = window.requestAnimationFrame(tickField);
         });
 
     if(potentialCheckbox !== null)
