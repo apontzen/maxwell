@@ -106,9 +106,9 @@
     </div>
     <div class="charge-properties">
         <label for="charge"><span class="charge_or_current">Charge</span>:</label>
-        <input type="range" id="charge" min="-10" max="10" step="1" value="1" style="vertical-align: middle;">
-        <span id="chargeValue">1</span>
-        <button id="deleteCharge">Delete <span class="charge_or_current">Charge</span></button>
+        <input type="range" class="charge" min="-10" max="10" step="1" value="1" style="vertical-align: middle;">
+        <span class="chargeValue">1</span>
+        <button class="deleteCharge">Delete <span class="charge_or_current">Charge</span></button>
     </div>
     <canvas id="vectorFieldCanvas" width="800" height="600"></canvas>
     <div class="json-input">
@@ -121,7 +121,14 @@
         <button id="pasteJson">Paste</button>
     </div>
 
+    <div id="test-embed"></div>
+
     <script src="./ui.js" type="module"></script>
+    <script type="module">
+        import {initialize_on_existing_dom, embed} from './ui.js';
+        initialize_on_existing_dom();
+        // embed('test-embed');
+    </script>
 
         
 

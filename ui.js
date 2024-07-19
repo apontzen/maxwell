@@ -1,37 +1,23 @@
 import init, { compute_field_electrostatic_direct, compute_field_magnetostatic_direct, 
     compute_electric_field_dynamic, init_panic_hook, FieldConfiguration } from './maxwell/out/maxwell.js';
 
-import { drawElectrostaticFieldLines, drawPotentialContours } from './fieldline.js';
+import { draw, getChargeFromPoint } from './draw.js';
 
-export const chargeSize = 10;
 
-export function getChargeFromPoint(charges, x, y, allowRadius) {
-    if (allowRadius == null) 
-        allowRadius = chargeSize;
-    for (let i = charges.length - 1; i >= 0; i--) {
-        // go in reverse order so that the charge on top is selected first
-        const charge = charges[i];
-        const dx = x - charge.x;
-        const dy = y - charge.y;
-        if (Math.sqrt(dx * dx + dy * dy) < allowRadius) {
-            return charge;
-        }
-    }
-    return null;
-}
 
-export async function main() {
+
+export async function main(params) {
+
+    const {canvas, addPositiveChargeButton, clearChargesButton, solverDropdown,
+        potentialControlsDiv, potentialCheckbox, copyJsonButton, pasteJsonButton, 
+        chargeOrCurrentSpans, chargePropertiesDiv, startingState,
+        allowEditChargeStrength, allowAddDeleteCharge} = params;
+        
     await init();
-
     init_panic_hook();
-
-
-    const canvas = document.getElementById('vectorFieldCanvas');
+    
     const ctx = canvas.getContext('2d');
-    const addPositiveChargeBtn = document.getElementById('addPositiveCharge');
-    const clearChargesBtn = document.getElementById('clearCharges');
-
-    const maxArrowLength = 40;
+    
 
     let charges = [];
     let draggingCharge = null;
@@ -39,7 +25,6 @@ export async function main() {
     let draggingOffsetY = 0;
 
     let nextChargeStrength = 1;
-
     let cic_resolution = 128;
 
     const dpr = window.devicePixelRatio || 1;
@@ -70,15 +55,26 @@ export async function main() {
     let field = null;
 
     let dynamic = false;
+
+    let showPotential = false;
+    let solver = null;
     
     let plotType = 'quiver';
 
-    function updateSolverType() {
+    function updateSolverType(solverType = null) {
+        field = new FieldConfiguration(rect.width, rect.height, cic_resolution, cic_resolution);
+
+        if (solverDropdown === null && solverType === null)
+            return;
+
+        if (solverType === null) {
+            solverType = solverDropdown.value;
+        }
+
+        solver = solverType;
+        
         let allowPotential = false;
 
-        // get value of solver
-        const solverType = document.getElementById('solver').value;
-        
         dynamic = solverType === 'dynamic';
 
         plotType = 'quiver';
@@ -100,12 +96,13 @@ export async function main() {
         } else {
             console.error('Unknown solver type');
         }
-        field = new FieldConfiguration(rect.width, rect.height, cic_resolution, cic_resolution);
 
-        if(allowPotential) {
-            document.getElementById('show-potential-control').style.display = 'inline';
-        } else {
-            document.getElementById('show-potential-control').style.display = 'none';
+        if(potentialControlsDiv !== null) {
+            if(allowPotential) {
+                potentialControlsDiv.style.display = 'inline';
+            } else {
+                potentialControlsDiv.style.display = 'none';
+            }
         }
     }
 
@@ -114,20 +111,23 @@ export async function main() {
     let animation_request_id = null;
     let last_time = null;
 
-    document.getElementById('solver').addEventListener('change', () => {
-        if(animation_request_id!==null)
-            window.cancelAnimationFrame(animation_request_id);
-        animation_request_id = null;
-        last_time = null;
-        updateSolverType();
-        drawVectorField();
-        if(dynamic)
-            animation_request_id = window.requestAnimationFrame(tickField);
-    });
+    if(solverDropdown !== null)
+        solverDropdown.addEventListener('change', () => {
+            if(animation_request_id!==null)
+                window.cancelAnimationFrame(animation_request_id);
+            animation_request_id = null;
+            last_time = null;
+            updateSolverType();
+            drawVectorField();
+            if(dynamic)
+                animation_request_id = window.requestAnimationFrame(tickField);
+        });
 
-    document.getElementById('potential').addEventListener('change', () => {
-        drawVectorField();
-    });
+    if(potentialCheckbox !== null)
+        potentialCheckbox.addEventListener('change', () => {
+            showPotential = potentialCheckbox.checked;
+            drawVectorField();
+        });
 
     function stateToJson() {
         let charges_normalized_coordinates = charges.map(charge => {
@@ -138,8 +138,8 @@ export async function main() {
 
         return JSON.stringify({
             charges: charges_normalized_coordinates,
-            solver: document.getElementById('solver').value,
-            show_potential: document.getElementById('potential').checked
+            solver: solver,
+            show_potential: showPotential
         });
     }
 
@@ -152,44 +152,43 @@ export async function main() {
                 return {...charge, x: scaledX, y: scaledY};
             });
 
-            document.getElementById('solver').value = state.solver;
-            document.getElementById('potential').checked = state.show_potential;
-            updateSolverType();
+            if(solverDropdown !== null)
+                solverDropdown.value = state.solver;
+
+            if(potentialCheckbox !== null)
+                potentialCheckbox.checked = state.show_potential;
+            
+            showPotential = state.show_potential;
+            updateSolverType(state.solver);
+
             return true;
         } else {
             return false;
         }
     }
 
-    function updateDisplayedJson() {
-        document.getElementById('jsonDescription').value = stateToJson();
-    }
+    if(copyJsonButton !== null)
+        copyJsonButton.addEventListener('click', () => {
+            const json = stateToJson();
+            navigator.clipboard.writeText(json);
+        });
 
-    /*
-    document.getElementById('loadJson').addEventListener('click', () => {
-        const json = document.getElementById('jsonDescription').value;
-        jsonToState(json);
-        drawVectorField();
-    });*/
+    if(pasteJsonButton !== null)
+        pasteJsonButton.addEventListener('click', async () => {
+            const json = await navigator.clipboard.readText();
+            if(jsonToState(json)) {
+                drawVectorField();
+            }
+        });
 
-    document.getElementById('copyJson').addEventListener('click', () => {
-        const json = document.getElementById('jsonDescription').value;
-        navigator.clipboard.writeText(json);
-    });
-
-    document.getElementById('pasteJson').addEventListener('click', async () => {
-        const json = await navigator.clipboard.readText();
-        console.log("paste", json);
-        if(jsonToState(json)) {
-            document.getElementById('jsonDescription').value = json;
-            drawVectorField();
+    if(startingState) {
+        jsonToState(startingState);
+    } else { 
+        // Load the state from local storage if it exists
+        const savedState = localStorage.getItem('maxwell_state');
+        if (savedState) {
+            jsonToState(savedState);
         }
-    });
-
-    // Load the state from local storage if it exists
-    const savedState = localStorage.getItem('maxwell_state');
-    if (savedState) {
-        jsonToState(savedState);
     }
 
     // Save the state to local storage whenever it changes
@@ -232,146 +231,64 @@ export async function main() {
     }
 
     function drawVectorField(user_update = true) {
-        if(user_update) {
-            updateDisplayedJson();
-            saveState();
-        }
-
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-
         field.set_charges(charges);
+
         if(!dynamic) {
             field.reset_fields();
             // if dynamic, the fields are being updated in real time and we don't want to reset them
         }
 
-        const x0 = 200.0;
-        const y0 = 200.0;
-        if (charges.length > 0 && computeField === compute_field_electrostatic_direct && document.getElementById('potential').checked) {
-            drawPotentialContours(field, [0], ctx, 'grey');
-
-            drawPotentialContours(field, [125., 250., 500., 1000.], ctx, 'blue');
-            
-            drawPotentialContours(field, [-125., -250., -500., -1000.], ctx, 'red');
+        if(user_update) {
+            saveState();
         }
 
-        if (plotType === 'quiver') {
-            const vectors = generateVectors();
-            drawQuiverPlot(vectors);
-        } else if (plotType === 'fieldline') {
-            if(computeField === compute_field_electrostatic_direct) {
-                // The following algorithm only works when field lines start and end on charges, so perfect for the
-                // electric case but not the magnetic case
-                drawElectrostaticFieldLines(charges, field, ctx, rect, chargeSize);
-            } else if (computeField === compute_field_magnetostatic_direct) {
-                // Here we take cheeky advantage of the fact that the magnetostatic field lines are equivalent to
-                // equipotential lines if we were solving an electrostatic problem. 
-                const rangeValues = [];
-                for (let i = 1.4; i <= 4.0; i += 0.4) {
-                    rangeValues.push(10**i);
-                    rangeValues.push(-(10**i));
-                }
-                rangeValues.push(0.0);
-                drawPotentialContours(field, rangeValues, ctx, 'black', true);
+        draw(ctx, rect, charges, field, plotType, computeField, 
+            computeField === compute_field_electrostatic_direct && showPotential);
 
-            } else {
-                console.error('Fieldlines not supported for this solver');
-            }
-        }
 
-        drawChargesOrCurrents();
 
     }
 
     function updateChargeOrCurrentLabel(charge_or_current) {
         // find all spans with class charge_or_current and update their contents to the provided string
-        const chargeOrCurrentSpans = document.querySelectorAll(`.charge_or_current`);
-        chargeOrCurrentSpans.forEach(span => {
-            span.textContent = charge_or_current;
-        });
+        if(chargeOrCurrentSpans!==null)
+            chargeOrCurrentSpans.forEach(span => {
+                span.textContent = charge_or_current;
+            });
     }
 
-    function generateVectors() {
-        const vectors = [];
-        const step = 20;
-
-        for (let x = step; x < rect.width; x += step) {
-            for (let y = step; y < rect.height; y += step) {
-                // exclude the vector if it's within step distance from any charge
-                if (charges.some(charge => {
-                    const dx = x - charge.x;
-                    const dy = y - charge.y;
-                    return Math.sqrt(dx * dx + dy * dy) < step;
-                })) continue;
-                const vector = computeField(field, x, y);
-                vectors.push({x, y, u: vector.u, v: vector.v});
-            }
-        }
-        
-        return vectors;
-    }
-
-    function drawQuiverPlot(vectors) {
-        vectors.forEach(({x, y, u, v}) => {
-            drawArrow(x, y, u, v);
-        });
-    }
-
-
-    function drawArrow(x, y, u, v) {
-        let arrowLength = Math.sqrt(u * u + v * v);
-        const angle = Math.atan2(v, u);
-
-        if(arrowLength > maxArrowLength) {
-            u = u / arrowLength * maxArrowLength;
-            v = v / arrowLength * maxArrowLength;
-            arrowLength = maxArrowLength;
-        }
-
-        x-=u/2;
-        y-=v/2;
-
-        ctx.lineWidth = 1;
-        ctx.strokeStyle = 'black';
-
-        ctx.beginPath();
-        ctx.moveTo(x, y);
-        ctx.lineTo(x + u, y + v);
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.fillStyle = 'black';
-        ctx.moveTo(x + u, y + v);
-        ctx.lineTo(x + u - arrowLength * 0.2 * Math.cos(angle - Math.PI / 6), y + v - arrowLength * 0.2 * Math.sin(angle - Math.PI / 6));
-        ctx.lineTo(x + u - arrowLength * 0.2 * Math.cos(angle + Math.PI / 6), y + v - arrowLength * 0.2 * Math.sin(angle + Math.PI / 6));
-        ctx.closePath();
-        ctx.fill();
-    }
-
-    const chargeInput = document.getElementById('charge');
-    const chargeValue = document.getElementById('chargeValue');
+    
+    
     let selectedCharge = null;
 
-    chargeInput.addEventListener('input', () => {
-        selectedCharge.charge = parseInt(chargeInput.value);
-        chargeValue.textContent = chargeInput.value;
-        drawVectorField();
-    });
+    if(chargePropertiesDiv!==null) {
+        const chargeInput = chargePropertiesDiv.querySelector('.charge');
+        const chargeValue = chargePropertiesDiv.querySelector('.chargeValue');
+        const deleteChargeBtn = chargePropertiesDiv.querySelector('.deleteCharge');
 
-    function deleteCharge(charge) {
-        charges = charges.filter(c => c !== charge);
-        field.set_charges(charges);
+        chargeInput.addEventListener('input', () => {
+            selectedCharge.charge = parseInt(chargeInput.value);
+            chargeValue.textContent = chargeInput.value;
+            drawVectorField();
+        });
+
+        function deleteCharge(charge) {
+            if(!allowAddDeleteCharge) return;
+            charges = charges.filter(c => c !== charge);
+            field.set_charges(charges);
+        }
+
+        deleteChargeBtn.addEventListener('click', () => {
+            deleteCharge(selectedCharge);
+            deselectCharge();
+            drawVectorField();
+        });
     }
 
-    const deleteChargeBtn = document.getElementById('deleteCharge');
-    deleteChargeBtn.addEventListener('click', () => {
-        deleteCharge(selectedCharge);
-        deselectCharge();
-        drawVectorField();
-    });
-
-
     function selectCharge(charge) {
+
+        if(!allowEditChargeStrength) return;
+        if(chargePropertiesDiv===null) return;
 
         chargeInput.value = charge.charge;
         chargeValue.textContent = chargeInput.value;
@@ -379,114 +296,59 @@ export async function main() {
 
         drawVectorField();
 
-        const chargeProperties = document.querySelector('.charge-properties');
-        chargeProperties.style.display = 'block';
+        
+        chargePropertiesDiv.style.display = 'block';
 
-        chargeProperties.style.display = 'block';
-        chargeProperties.style.position = 'absolute';
+        chargePropertiesDiv.style.display = 'block';
+        chargePropertiesDiv.style.position = 'absolute';
         const canvasRect = canvas.getBoundingClientRect();
         const pageOffsetTop = window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
         const pageOffsetLeft = window.scrollX || document.documentElement.scrollLeft || document.body.scrollLeft || 0;
         const canvasRectTop = canvasRect.top + pageOffsetTop;
         const canvasRectLeft = canvasRect.left + pageOffsetLeft;
-        chargeProperties.style.top = `${canvasRectTop + charge.y - chargeProperties.offsetHeight / 2}px`;
+        chargePropertiesDiv.style.top = `${canvasRectTop + charge.y - chargePropertiesDiv.offsetHeight / 2}px`;
 
         // Check if charge is on the right side of the screen
         if (charge.x > rect.width / 2) {
-            chargeProperties.style.left = `${canvasRectLeft + charge.x - chargeProperties.offsetWidth - 20}px`;
-            chargeProperties.classList.add('point-right');
-            chargeProperties.classList.remove('point-left');
+            chargePropertiesDiv.style.left = `${canvasRectLeft + charge.x - chargePropertiesDiv.offsetWidth - 20}px`;
+            chargePropertiesDiv.classList.add('point-right');
+            chargePropertiesDiv.classList.remove('point-left');
         } else {
-            chargeProperties.style.left = `${canvasRectLeft + charge.x + 20}px`;
-            chargeProperties.classList.add('point-left');
-            chargeProperties.classList.remove('point-right');
+            chargePropertiesDiv.style.left = `${canvasRectLeft + charge.x + 20}px`;
+            chargePropertiesDiv.classList.add('point-left');
+            chargePropertiesDiv.classList.remove('point-right');
         }
         // if the chargeProperties div is off the screen, move it back on
-        if (chargeProperties.offsetLeft < 0) {
-            chargeProperties.style.left = '0';
+        if (chargePropertiesDiv.offsetLeft < 0) {
+            chargePropertiesDiv.style.left = '0';
         }
-        if (chargeProperties.offsetLeft + chargeProperties.offsetWidth > window.innerWidth) {
-            chargeProperties.style.left = `${window.innerWidth - chargeProperties.offsetWidth}px`;
+        if (chargePropertiesDiv.offsetLeft + chargePropertiesDiv.offsetWidth > window.innerWidth) {
+            chargePropertiesDiv.style.left = `${window.innerWidth - chargePropertiesDiv.offsetWidth}px`;
         }
-        chargeProperties.style.zIndex = '1';
+        chargePropertiesDiv.style.zIndex = '1';
 
         
     }
 
     function deselectCharge() {
-        const chargeProperties = document.querySelector('.charge-properties');
-        chargeProperties.style.display = 'none';
+    
         if (selectedCharge !== null) {
             nextChargeStrength = selectedCharge.charge;         
         }
 
         selectedCharge = null;
+
+        if(chargePropertiesDiv!==null) 
+            chargePropertiesDiv.style.display = 'none';
+
         drawVectorField();
     }
 
-    function drawChargesOrCurrents() {
-        if (computeField === compute_field_magnetostatic_direct) {
-            drawCurrents();
-        } else {
-            drawCharges();
-        }
-    }
-
-    function drawCharges() {
-        charges.forEach(charge => {
-            
-            ctx.beginPath();
-            ctx.arc(charge.x, charge.y, chargeSize, 0, 2 * Math.PI, false);
-            ctx.fillStyle = charge.charge > 0 ? 'red' : 'blue';
-            ctx.fill();
-            changeLineStyleIfSelected(charge);
-            ctx.stroke();
-        });
-    }
-
-    function changeLineStyleIfSelected(charge) {
-        if (charge === selectedCharge) {
-            ctx.strokeStyle = 'black';
-            ctx.lineWidth = 2;
-        } else {
-            ctx.strokeStyle = 'grey';
-            ctx.lineWidth = 1;
-        }
-    }
-
-    function drawCurrents() {
-        // Interpret the charges as currents. If current is positive, show as a 
-        // circle with a dot in the centre. If current is negative, show as a circle with
-        // a cross through it
-        charges.forEach(charge => {
-            ctx.beginPath();
-            ctx.arc(charge.x, charge.y, chargeSize, 0, 2 * Math.PI, false);
-            ctx.fillStyle = 'white';
-            ctx.fill();
-            changeLineStyleIfSelected(charge);
-            ctx.stroke();
-            ctx.beginPath();
-            if (charge.charge>0) {
-                ctx.arc(charge.x, charge.y, chargeSize / 4, 0, 2 * Math.PI, false);
-                ctx.fillStyle = 'black';
-                ctx.fill();
-                ctx.stroke();
-            } else if (charge.charge < 0) {
-                ctx.beginPath();
-                ctx.moveTo(charge.x - chargeSize / 2, charge.y - chargeSize / 2);
-                ctx.lineTo(charge.x + chargeSize / 2, charge.y + chargeSize / 2);
-                ctx.stroke();
-                ctx.beginPath();
-                ctx.moveTo(charge.x + chargeSize / 2, charge.y - chargeSize / 2);
-                ctx.lineTo(charge.x - chargeSize / 2, charge.y + chargeSize / 2);
-                ctx.stroke();
-            }
-        });
-    }
 
     let charge_id = 0;
 
     function addCharge(x, y, charge) {
+        if(!allowAddDeleteCharge) return;
         charges.push({x, y, charge, id: charge_id});
         charge_id++;
         deselectCharge();
@@ -609,23 +471,61 @@ export async function main() {
         return false;
     });
 
-    addPositiveChargeBtn.addEventListener('click', () => {
-        addCharge(canvas.width / (2*dpr), canvas.height / (2*dpr), 1);
-    });
+    if(addPositiveChargeButton!==null) 
+        addPositiveChargeButton.addEventListener('click', () => {
+            addCharge(canvas.width / (2*dpr), canvas.height / (2*dpr), 1);
+        });
 
-    clearChargesBtn.addEventListener('click', () => {
-        charges = [];
-        deselectCharge();
-        drawVectorField();
-    });
-
-    /*
-    addNegativeChargeBtn.addEventListener('click', () => {
-        addCharge(canvas.width / (2*dpr), canvas.height / (2*dpr), -1);
-    });
-    */
+    if(clearChargesButton!==null)
+        clearChargesButton.addEventListener('click', () => {
+            if(!allowAddDeleteCharge) return;
+            charges = [];
+            deselectCharge();
+            drawVectorField();
+        });
 
     drawVectorField();
 }
 
-window.addEventListener('load', main);
+export function initialize_on_existing_dom() {
+    window.addEventListener('load', ()=> {
+        const canvas = document.getElementById('vectorFieldCanvas');
+        const addPositiveChargeButton = document.getElementById('addPositiveCharge');
+        const clearChargesButton = document.getElementById('clearCharges');
+        const solverDropdown = document.getElementById('solver');
+        const potentialControlsDiv = document.getElementById('show-potential-control')
+        const potentialCheckbox = document.getElementById('potential');
+        const copyJsonButton = document.getElementById('copyJson');
+        const pasteJsonButton = document.getElementById('pasteJson');
+        const chargeOrCurrentSpans = document.querySelectorAll('.charge-or-current');
+        const chargePropertiesDiv = document.querySelector('.charge-properties');
+
+        const startingState = null;
+
+        const allowEditChargeStrength = true;
+        const allowAddDeleteCharge = true;
+
+        const params = {
+            canvas, addPositiveChargeButton, clearChargesButton, solverDropdown, potentialControlsDiv,
+            potentialCheckbox, copyJsonButton, pasteJsonButton, chargeOrCurrentSpans, chargePropertiesDiv,
+            startingState, allowEditChargeStrength, allowAddDeleteCharge
+        }
+        main(params);
+
+    });
+}
+
+export function embed(div_id) {
+    const div = document.getElementById(div_id);
+    const canvas = div.appendChild(document.createElement('canvas'));
+
+    const startingState = '{"charges":[{"x":0.669576059850374,"y":0.5647840531561462,"charge":-1,"id":0,"angle":-1.4801364395941514},{"x":0.6745635910224439,"y":0.49169435215946844,"charge":1,"id":1,"angle":3.010151491700654},{"x":0.30673316708229426,"y":0.5564784053156147,"charge":1,"id":2,"angle":0.01718044001530618}],"solver":"electrostatic_direct_fieldline","show_potential":true}';
+
+
+    const params = {
+        canvas, addPositiveChargeButton: null, clearChargesButton: null, solverDropdown: null, potentialControlsDiv: null,
+        potentialCheckbox: null, copyJsonButton: null, pasteJsonButton: null, chargeOrCurrentSpans: null, chargePropertiesDiv: null,
+        startingState: startingState, allowEditChargeStrength: false, allowAddDeleteCharge: false
+    }
+    main(params);
+}

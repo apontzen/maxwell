@@ -1,5 +1,5 @@
 import { compute_field_electrostatic_direct, generate_potential_contours_at_levels, generate_potential_contours_and_arrow_positions_at_levels, compute_field_magnetostatic_direct } from './maxwell/out/maxwell.js';
-import { getChargeFromPoint, chargeSize } from './ui.js';
+import { getChargeFromPoint, chargeSize } from './draw.js';
 
 const DEBUG_MESSAGES = false; // Warning: can generate a LOT of console output!
 
