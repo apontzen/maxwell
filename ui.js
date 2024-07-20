@@ -1,5 +1,5 @@
-import init, { compute_field_electrostatic_direct, compute_field_magnetostatic_direct, 
-    compute_electric_field_dynamic, init_panic_hook, FieldConfiguration } from './maxwell/out/maxwell.js';
+import init, { compute_field_electrostatic_direct_to_buffer, compute_field_magnetostatic_direct_to_buffer,
+    compute_electric_field_dynamic_to_buffer, init_panic_hook, FieldConfiguration } from './maxwell/out/maxwell.js';
 
 import { draw, getChargeFromPoint } from './draw.js';
 
@@ -20,7 +20,7 @@ export async function main(params) {
         init_panic_hook();
         isInitialized = true;
     }
-    
+
     const ctx = canvas.getContext('2d');
     
 
@@ -56,7 +56,7 @@ export async function main(params) {
     canvas.style.width = `${rect.width}px`;
     canvas.style.height = `${rect.height}px`;
 
-    let computeField = compute_field_electrostatic_direct;
+    let computeField = compute_field_electrostatic_direct_to_buffer;
     let field = null;
 
     let dynamic = false;
@@ -90,14 +90,14 @@ export async function main(params) {
 
         if (solverType === 'electrostatic_direct' || solverType === 'electrostatic_direct_fieldline') {
             updateChargeOrCurrentLabel('Charge');
-            computeField = compute_field_electrostatic_direct;
+            computeField = compute_field_electrostatic_direct_to_buffer;
             allowPotential = true;
         } else if (solverType === 'electrostatic_fourier' || solverType === 'dynamic') {
             updateChargeOrCurrentLabel('Charge');
-            computeField = compute_electric_field_dynamic;
+            computeField = compute_electric_field_dynamic_to_buffer;
         } else if (solverType === 'magnetostatic_direct' || solverType === 'magnetostatic_direct_fieldline') { 
             updateChargeOrCurrentLabel('Current');
-            computeField = compute_field_magnetostatic_direct;
+            computeField = compute_field_magnetostatic_direct_to_buffer;
         } else {
             console.error('Unknown solver type');
         }
@@ -249,7 +249,7 @@ export async function main(params) {
         }
 
         draw(ctx, rect, charges, field, plotType, computeField, 
-            computeField === compute_field_electrostatic_direct && showPotential);
+            computeField === compute_field_electrostatic_direct_to_buffer && showPotential);
 
 
 
@@ -371,11 +371,12 @@ export async function main(params) {
         const x_values = [];
         const u_values = [];
         const v_values = [];
+        const buffer = new Float64Array(2);
         for (let x = 0; x < rect.width; x += 10) {
-            const E = computeField(field, x, y);
+            computeField(field, x, y, buffer);
             x_values.push(x);
-            u_values.push(E[0]);
-            v_values.push(E[1]);
+            u_values.push(buffer[0]);
+            v_values.push(buffer[1]);
         }
 
         const x_ar = ('x = np.array(' + JSON.stringify(x_values) + ');');

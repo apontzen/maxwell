@@ -1,6 +1,6 @@
 import { drawElectrostaticFieldLines, drawPotentialContours } from './fieldline.js';
-import { compute_field_electrostatic_direct, compute_field_magnetostatic_direct, 
-    compute_electric_field_dynamic} from './maxwell/out/maxwell.js';
+import { compute_field_electrostatic_direct_to_buffer, compute_field_magnetostatic_direct_to_buffer, 
+    compute_electric_field_dynamic_to_buffer} from './maxwell/out/maxwell.js';
 
 
 const maxArrowLength = 40;
@@ -23,7 +23,7 @@ export function getChargeFromPoint(charges, x, y, allowRadius) {
 }
 
 function drawChargesOrCurrents(ctx, charges, computeField, selectedCharge) {
-    if (computeField === compute_field_magnetostatic_direct) {
+    if (computeField === compute_field_magnetostatic_direct_to_buffer) {
         drawCurrents(ctx, charges, selectedCharge);
     } else {
         drawCharges(ctx, charges, selectedCharge);
@@ -85,6 +85,7 @@ function drawCurrents(ctx, charges, selectedCharge) {
 function generateVectors(computeField, rect, charges, field) {
     const vectors = [];
     const step = 20;
+    let buffer = new Float64Array(2);
 
     for (let x = step; x < rect.width; x += step) {
         for (let y = step; y < rect.height; y += step) {
@@ -94,8 +95,8 @@ function generateVectors(computeField, rect, charges, field) {
                 const dy = y - charge.y;
                 return Math.sqrt(dx * dx + dy * dy) < step;
             })) continue;
-            const vector = computeField(field, x, y);
-            vectors.push({x, y, u: vector.u, v: vector.v});
+            computeField(field, x, y, buffer);
+            vectors.push({x, y, u: buffer[0], v: buffer[1]});
         }
     }
     
@@ -152,11 +153,11 @@ export function draw(ctx, rect, charges, field, fieldVisType, computeField, show
     if (fieldVisType === 'quiver') {
         const vectors = generateVectors(computeField, rect, charges, field);
         drawQuiverPlot(ctx, vectors);
-    } else if (fieldVisType === 'fieldline' && computeField === compute_field_electrostatic_direct) {
+    } else if (fieldVisType === 'fieldline' && computeField === compute_field_electrostatic_direct_to_buffer) {
         // The following algorithm only works when field lines start and end on charges, so perfect for the
         // electric case but not the magnetic case
         drawElectrostaticFieldLines(charges, field, ctx, rect, chargeSize);
-    } else if (fieldVisType === 'fieldline' && computeField === compute_field_magnetostatic_direct) {
+    } else if (fieldVisType === 'fieldline' && computeField === compute_field_magnetostatic_direct_to_buffer) {
         // Here we take cheeky advantage of the fact that the magnetostatic field lines are equivalent to
         // equipotential lines if we were solving an electrostatic problem. 
         const rangeValues = [];

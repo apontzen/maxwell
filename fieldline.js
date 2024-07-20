@@ -1,7 +1,7 @@
-import { compute_field_electrostatic_direct, generate_potential_contours_at_levels, generate_potential_contours_and_arrow_positions_at_levels, compute_field_magnetostatic_direct } from './maxwell/out/maxwell.js';
+import { compute_field_electrostatic_direct, generate_potential_contours_at_levels, generate_potential_contours_and_arrow_positions_at_levels, compute_field_magnetostatic_direct, compute_field_electrostatic_direct_to_buffer } from './maxwell/out/maxwell.js';
 import { getChargeFromPoint, chargeSize } from './draw.js';
 
-const DEBUG_MESSAGES = false; // Warning: can generate a LOT of console output!
+const DEBUG_MESSAGES = true; // Warning: can generate a LOT of console output!
 
 function debug_log(...message) {
     if(DEBUG_MESSAGES) {
@@ -361,14 +361,16 @@ export function drawElectrostaticFieldLines(charges, field, ctx, rect, chargeSiz
             let u_last = 0;
             let v_last = 0;
 
+            let buffer = new Float64Array(2);
+
             while((length_covered<20 || getChargeFromPoint(charges, stream_x, stream_y) === null)
                 && (stream_x>-rect.width && stream_y>-rect.height && stream_x<2*rect.width && stream_y<2*rect.height)
                 && n_steps<1000) {
                 n_steps++;
 
-                const E = compute_field_electrostatic_direct(field, stream_x, stream_y);
-                let u = E.u;
-                let v = E.v;
+                compute_field_electrostatic_direct_to_buffer(field, stream_x, stream_y, buffer);
+                let u = buffer[0];
+                let v = buffer[1];
                 let norm = Math.sqrt(u * u + v * v);
 
                 if (norm<1e-4) {
@@ -386,9 +388,9 @@ export function drawElectrostaticFieldLines(charges, field, ctx, rect, chargeSiz
                 y_steps.push(stream_y);
 
                 // corrector step
-                const E2 = compute_field_electrostatic_direct(field, stream_x, stream_y);
-                const u2 = E2.u;
-                const v2 = E2.v;
+                compute_field_electrostatic_direct_to_buffer(field, stream_x, stream_y, buffer);
+                const u2 = buffer[0];
+                const v2 = buffer[1];
                 const norm2 = Math.sqrt(u2 * u2 + v2 * v2);
 
                 if(norm2>1e-4) {
