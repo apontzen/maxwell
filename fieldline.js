@@ -112,8 +112,8 @@ class MultiStreamDepartures {
 
         this.num_departure_per_range = num_departure_per_range;
 
-
-        debug_log("exclusion ranges:", this.arrival_range);
+        debug_log("arrivals:", this.arrivals);
+        debug_log("exclusion ranges:", exclusion_ranges);
         debug_log("departure ranges:", available_ranges);
         debug_log("num_departure_per_range:", num_departure_per_range);
 
@@ -170,49 +170,64 @@ class MultiStreamDepartures {
         return angle;
     }
 
-    arrivals_to_range(arrivals) {
-        let min_angle = Math.min(...arrivals);
-        let max_angle = Math.max(...arrivals);
-        let angle_range = max_angle - min_angle;
+    arrivals_to_range(arrivals, source_charge, arrival_charge) {
 
+        const angle_from_source = Math.atan2(source_charge.y - arrival_charge.y, source_charge.x - arrival_charge.x);
 
-        // the range above may not be the best way to express it; for example if two lines
-        // arrive, one at 6.1 and one at 0.1, we want to consider the arrival range to be
-        // between 6.1 and 0.1 + 2 pi. Test for this condition and choose the best way
-        // to express the interval
-        for (let offset = 1; offset<4; offset++) {
-            const arrivals_wrapped = arrivals.map(a => (a + offset * Math.PI/2)%(2*Math.PI) - offset * Math.PI/2);
-            const min_angle_wrapped = Math.min(...arrivals_wrapped);
-            const max_angle_wrapped = Math.max(...arrivals_wrapped);
-            const offset_range = max_angle_wrapped - min_angle_wrapped;
-            if (offset_range<angle_range) {
-                min_angle = min_angle_wrapped;
-                max_angle = max_angle_wrapped;
-                angle_range = offset_range;
+        let min_angle_relative_to_source = 2*Math.PI;
+        let max_angle_relative_to_source = -2*Math.PI;
+
+        for (let arrival of arrivals) {
+            let angle_relative_to_source = arrival - angle_from_source;
+            if (angle_relative_to_source > Math.PI) {
+                angle_relative_to_source -= 2*Math.PI;
             }
-
+            if (angle_relative_to_source < -Math.PI) {
+                angle_relative_to_source += 2*Math.PI;
+            }
+            if (angle_relative_to_source < min_angle_relative_to_source) {
+                min_angle_relative_to_source = angle_relative_to_source;
+            }
+            if (angle_relative_to_source > max_angle_relative_to_source) {
+                max_angle_relative_to_source = angle_relative_to_source;
+            }
         }
 
-        
-        min_angle+=2*Math.PI;
-        max_angle+=2*Math.PI;
+        let min_angle = angle_from_source + min_angle_relative_to_source;
+        let max_angle = angle_from_source + max_angle_relative_to_source;
 
-        min_angle = min_angle%(2*Math.PI);
-        max_angle = max_angle%(2*Math.PI);
+
+        if(min_angle<0)
+            min_angle+=2*Math.PI;
+
+        if(max_angle<0)
+            max_angle+=2*Math.PI;
+
+        if(min_angle>2*Math.PI)
+            min_angle-=2*Math.PI;
+
+        if(max_angle>2*Math.PI)
+            max_angle-=2*Math.PI;
+
+        debug_log("arrivals:", arrivals, "min_angle:", min_angle, "max_angle:", max_angle, "angle_from_source", angle_from_source);
+
 
         return [min_angle, max_angle];
     }
 
-    register_arrival(angle, source) {
+    register_arrival(angle, source_charge, arrival_charge) {
+
+        const source_id = source_charge.id;
+
         angle = (angle + 2*Math.PI)%(2*Math.PI);
 
         this.num_departures--;
-        if (!(source in this.arrivals)) {
-            this.arrivals[source] = [];
+        if (!(source_id in this.arrivals)) {
+            this.arrivals[source_id] = [];
         }
-        this.arrivals[source].push(angle);
+        this.arrivals[source_id].push(angle);
 
-        this.arrival_range[source] = this.arrivals_to_range(this.arrivals[source]);
+        this.arrival_range[source_id] = this.arrivals_to_range(this.arrivals[source_id], source_charge, arrival_charge);
         this.departure_ranges = null; // important: invalidate departure ranges
         
     }
@@ -396,7 +411,7 @@ export function drawElectrostaticFieldLines(charges, field, ctx, rect, chargeSiz
             if (landed_charge !== null) {
                 // the arrival at another charge needs to be registered so that we don't over-launch
                 // field lines from that charge
-                const angle = Math.atan2(stream_y - landed_charge.y, stream_x - landed_charge.x);
+                const angle = Math.atan2(-step*v_last, -step*u_last);
                 debug_log("landed", landed_charge.id,"angle",angle);
                 const arrived_at = landed_charge.departures;
                 if(arrived_at.next_departure_index==arrived_at.num_departures) {
@@ -408,13 +423,13 @@ export function drawElectrostaticFieldLines(charges, field, ctx, rect, chargeSiz
                     } else {
                         debug_log("Failed streamline launch. Backtracking.");
                         departures.next_departure_index--;
-                        departures.register_arrival(stream_angle, landed_charge.id);
+                        departures.register_arrival(stream_angle, landed_charge, charge);
                         departures.num_departures++;
                         continue;
                     }
 
                 } else {
-                    arrived_at.register_arrival(angle, charge.id);
+                    arrived_at.register_arrival(angle, charge, landed_charge);
                 }
             } else {
                 debug_log("left the arena");

@@ -518,17 +518,20 @@ export function initialize_on_existing_dom() {
     });
 }
 
-export function embed(div_id) {
-    const div = document.getElementById(div_id);
-    const canvas = div.appendChild(document.createElement('canvas'));
+export function embed() {
+    const meme = document.createElement('meme-embed');
+    window.addEventListener('load', () => {
+        const all_memes = document.querySelectorAll('meme-embed');
+        all_memes.forEach(meme => {
+            const canvas = meme.appendChild(document.createElement('canvas'));
+            const startingState = meme.getAttribute('meme');
 
-    const startingState = '{"charges":[{"x":0.669576059850374,"y":0.5647840531561462,"charge":-1,"id":0,"angle":-1.4801364395941514},{"x":0.6745635910224439,"y":0.49169435215946844,"charge":1,"id":1,"angle":3.010151491700654},{"x":0.30673316708229426,"y":0.5564784053156147,"charge":1,"id":2,"angle":0.01718044001530618}],"solver":"electrostatic_direct_fieldline","show_potential":true}';
-
-
-    const params = {
-        canvas, addPositiveChargeButton: null, clearChargesButton: null, solverDropdown: null, potentialControlsDiv: null,
-        potentialCheckbox: null, copyJsonButton: null, pasteJsonButton: null, chargeOrCurrentSpans: null, chargePropertiesDiv: null,
-        startingState: startingState, allowEditChargeStrength: false, allowAddDeleteCharge: false
-    }
-    main(params);
+            const params = {
+                canvas, addPositiveChargeButton: null, clearChargesButton: null, solverDropdown: null, potentialControlsDiv: null,
+                potentialCheckbox: null, copyJsonButton: null, pasteJsonButton: null, chargeOrCurrentSpans: null, chargePropertiesDiv: null,
+                startingState: startingState, allowEditChargeStrength: false, allowAddDeleteCharge: false
+            }
+            main(params);
+        });
+    });
 }
