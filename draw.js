@@ -10,6 +10,8 @@ export const chargeSize = 10;
 export function getChargeFromPoint(charges, x, y, allowRadius) {
     if (allowRadius == null) 
         allowRadius = chargeSize;
+    else
+        allowRadius += chargeSize;
     for (let i = charges.length - 1; i >= 0; i--) {
         // go in reverse order so that the charge on top is selected first
         const charge = charges[i];

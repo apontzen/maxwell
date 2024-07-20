@@ -1,7 +1,7 @@
 import { compute_field_electrostatic_direct, generate_potential_contours_at_levels, generate_potential_contours_and_arrow_positions_at_levels, compute_field_magnetostatic_direct, compute_field_electrostatic_direct_to_buffer } from './maxwell/out/maxwell.js';
 import { getChargeFromPoint, chargeSize } from './draw.js';
 
-const DEBUG_MESSAGES = true; // Warning: can generate a LOT of console output!
+const DEBUG_MESSAGES = false; // Warning: can generate a LOT of console output!
 
 function debug_log(...message) {
     if(DEBUG_MESSAGES) {
@@ -350,7 +350,7 @@ export function drawElectrostaticFieldLines(charges, field, ctx, rect, chargeSiz
             
 
             
-            const step_size = 5.0;
+            const step_size = 1.0;
             const step = charge.charge>0?step_size:-step_size;
 
             const x_steps = [stream_x];
@@ -365,7 +365,7 @@ export function drawElectrostaticFieldLines(charges, field, ctx, rect, chargeSiz
 
             while((length_covered<20 || getChargeFromPoint(charges, stream_x, stream_y) === null)
                 && (stream_x>-rect.width && stream_y>-rect.height && stream_x<2*rect.width && stream_y<2*rect.height)
-                && n_steps<1000) {
+                && n_steps<5000) {
                 n_steps++;
 
                 compute_field_electrostatic_direct_to_buffer(field, stream_x, stream_y, buffer);

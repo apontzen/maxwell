@@ -412,7 +412,7 @@ export async function main(params) {
         const { offsetX, offsetY } = coordinatesFromMouseOrTouch(event);
         let allowRadius = null;
         if (event.touches) {
-            allowRadius = event.touches[0].radiusX + chargeSize;
+            allowRadius = event.touches[0].radiusX;
         } 
         return getChargeFromPoint(charges, offsetX, offsetY, allowRadius);
     }
