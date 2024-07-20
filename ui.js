@@ -3,6 +3,8 @@ import init, { compute_field_electrostatic_direct, compute_field_magnetostatic_d
 
 import { draw, getChargeFromPoint } from './draw.js';
 
+let isInitialized = false;
+
 
 
 
@@ -13,8 +15,11 @@ export async function main(params) {
         chargeOrCurrentSpans, chargePropertiesDiv, startingState,
         allowEditChargeStrength, allowAddDeleteCharge} = params;
         
-    await init();
-    init_panic_hook();
+    if(!isInitialized) {
+        await init();
+        init_panic_hook();
+        isInitialized = true;
+    }
     
     const ctx = canvas.getContext('2d');
     
