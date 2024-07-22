@@ -581,10 +581,31 @@ export function embed() {
             const canvas = meme.appendChild(document.createElement('canvas'));
             const startingState = meme.getAttribute('meme');
 
+            let fieldlinesControlsDiv = null;
+            let fieldlinesCheckbox = null;
+
+            if(meme.getAttribute('fieldlines-checkbox')) {
+                fieldlinesControlsDiv = document.createElement('div');
+
+                fieldlinesCheckbox = document.createElement('input');
+                fieldlinesCheckbox.type = 'checkbox';
+                fieldlinesCheckbox.checked = false;
+                fieldlinesControlsDiv.appendChild(fieldlinesCheckbox);
+                
+                const fieldlinesLabel = document.createElement('label');
+                fieldlinesLabel.htmlFor = 'fieldlines';
+                fieldlinesLabel.textContent = 'Fieldlines';
+                fieldlinesControlsDiv.appendChild(fieldlinesLabel);
+
+                meme.appendChild(fieldlinesControlsDiv);
+            }
+
+
             const params = {
                 canvas, addPositiveChargeButton: null, clearChargesButton: null, solverDropdown: null, potentialControlsDiv: null,
                 potentialCheckbox: null, copyJsonButton: null, pasteJsonButton: null, chargeOrCurrentSpans: null, chargePropertiesDiv: null,
-                startingState: startingState, allowEditChargeStrength: false, allowAddDeleteCharge: false
+                startingState: startingState, allowEditChargeStrength: false, allowAddDeleteCharge: false,
+                fieldlinesControlsDiv, fieldlinesCheckbox
             }
             main(params);
         });
