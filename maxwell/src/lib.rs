@@ -418,7 +418,13 @@ pub fn compute_field_electrostatic_direct(field_configuration: &FieldConfigurati
         v += k * dy / (r * r * r);
     }
     Pair { u, v }
-    // to_value(&(u, v)).unwrap()
+}
+
+#[wasm_bindgen]
+pub fn compute_field_electrostatic_direct_to_buffer(field_configuration: &FieldConfiguration, x: f64, y: f64, buffer: &mut [f64]) {
+    let Pair { u, v } = compute_field_electrostatic_direct(field_configuration, x, y);
+    buffer[0] = u;
+    buffer[1] = v;
 }
 
 #[wasm_bindgen]
@@ -430,7 +436,21 @@ pub fn compute_field_magnetostatic_direct(field_configuration: &FieldConfigurati
 }
 
 #[wasm_bindgen]
+pub fn compute_field_magnetostatic_direct_to_buffer(field_configuration: &FieldConfiguration, x: f64, y: f64, buffer: &mut [f64]) {
+    let Pair { u, v } = compute_field_magnetostatic_direct(field_configuration, x, y);
+    buffer[0] = u;
+    buffer[1] = v;
+}
+
+#[wasm_bindgen]
 pub fn compute_electric_field_dynamic(field_configuration: &mut FieldConfiguration, x: f64, y: f64) -> Pair {
     let (u, v) = field_configuration.evaluate_elec_interpolated(x, y);
     Pair { u, v }
+}
+
+#[wasm_bindgen]
+pub fn compute_electric_field_dynamic_to_buffer(field_configuration: &mut FieldConfiguration, x: f64, y: f64, buffer: &mut [f64]) {
+    let Pair { u, v } = compute_electric_field_dynamic(field_configuration, x, y);
+    buffer[0] = u;
+    buffer[1] = v;
 }
