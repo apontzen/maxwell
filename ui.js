@@ -12,8 +12,8 @@ export async function main(params) {
 
     const {canvas, addPositiveChargeButton, clearChargesButton, solverDropdown,
         potentialControlsDiv, potentialCheckbox, copyJsonButton, pasteJsonButton, 
-        chargeOrCurrentSpans, chargePropertiesDiv, startingState,
-        allowEditChargeStrength, allowAddDeleteCharge} = params;
+        chargeOrCurrentSpans, chargePropertiesDiv, startingState, fieldlinesControlsDiv,
+        fieldlinesCheckbox, allowEditChargeStrength, allowAddDeleteCharge} = params;
         
     if(!isInitialized) {
         await init();
@@ -62,78 +62,116 @@ export async function main(params) {
     let dynamic = false;
 
     let showPotential = false;
-    let solver = null;
+    let solver = 'electrostatic_direct';
     
     let plotType = 'quiver';
 
-    function updateSolverType(solverType = null) {
-        field = new FieldConfiguration(rect.width, rect.height, cic_resolution, cic_resolution);
+    let animation_request_id = null;
+    let last_time = null;
 
-        if (solverDropdown === null && solverType === null)
-            return;
 
-        if (solverType === null) {
-            solverType = solverDropdown.value;
-        }
-
-        solver = solverType;
-        
-        let allowPotential = false;
-
-        dynamic = solverType === 'dynamic';
-
-        plotType = 'quiver';
-
-        if (solverType.endsWith('_fieldline')) {
-            plotType = 'fieldline';
-        }
-
-        if (solverType === 'electrostatic_direct' || solverType === 'electrostatic_direct_fieldline') {
-            updateChargeOrCurrentLabel('Charge');
-            computeField = compute_field_electrostatic_direct_to_buffer;
-            allowPotential = true;
-        } else if (solverType === 'electrostatic_fourier' || solverType === 'dynamic') {
-            updateChargeOrCurrentLabel('Charge');
-            computeField = compute_electric_field_dynamic_to_buffer;
-        } else if (solverType === 'magnetostatic_direct' || solverType === 'magnetostatic_direct_fieldline') { 
-            updateChargeOrCurrentLabel('Current');
-            computeField = compute_field_magnetostatic_direct_to_buffer;
-        } else {
-            console.error('Unknown solver type');
-        }
-
+    function uiFromState() {
         if(potentialControlsDiv !== null) {
+            const allowPotential = solver === 'electrostatic_direct';
             if(allowPotential) {
                 potentialControlsDiv.style.display = 'inline';
+
+                if(fieldlinesCheckbox !== null)
+                    fieldlinesCheckbox.checked = (plotType === 'fieldline');
+
             } else {
                 potentialControlsDiv.style.display = 'none';
             }
         }
 
+        if(fieldlinesControlsDiv !== null) {
+            const allowFieldlines = solver === 'electrostatic_direct' || solver === 'magnetostatic_direct';
+
+            if(allowFieldlines) {
+                fieldlinesControlsDiv.style.display = 'inline';
+                if(fieldlinesCheckbox !== null)
+                    fieldlinesCheckbox.checked = (plotType === 'fieldline');
+            } else {
+                fieldlinesControlsDiv.style.display = 'none';
+                plotType = 'quiver';
+            }
+        }
+
+        if(solverDropdown !== null)
+            solverDropdown.value = solver;
+
+        if(potentialCheckbox !== null)
+            potentialCheckbox.checked = showPotential;
+
+        
+
+        if(solver === 'magnetostatic_direct') {
+            updateChargeOrCurrentLabel('Current');
+        } else {
+            updateChargeOrCurrentLabel('Charge');
+        }
+
+    }
+
+    function stateFromUi() {
+        
+        if(animation_request_id!==null)
+            window.cancelAnimationFrame(animation_request_id);
+
+        animation_request_id = null;
+        last_time = null;
+
+        if(solverDropdown !== null) 
+            solver = solverDropdown.value;
+
+        if(potentialCheckbox !== null)
+            showPotential = potentialCheckbox.checked;
+
+        if(fieldlinesCheckbox !== null)
+            plotType = fieldlinesCheckbox.checked ? 'fieldline' : 'quiver';
+
+        updateSolverType();
+
+    }
+
+
+
+    function updateSolverType() {
+        field = new FieldConfiguration(rect.width, rect.height, cic_resolution, cic_resolution);
+        
+        dynamic = solver === 'dynamic';
+
+        if (solver === 'electrostatic_direct') {
+            computeField = compute_field_electrostatic_direct_to_buffer;
+        } else if (solver === 'electrostatic_fourier' || solver === 'dynamic') {
+            computeField = compute_electric_field_dynamic_to_buffer;
+        } else if (solver === 'magnetostatic_direct') { 
+            computeField = compute_field_magnetostatic_direct_to_buffer;
+        } else {
+            console.error('Unknown solver type');
+        }
+
+        console.log(dynamic);
+
+        uiFromState(); // e.g. updates visibility of potential checkbox
+
         if(dynamic)
             animation_request_id = window.requestAnimationFrame(tickField);
+        else
+            drawVectorField();
     }
+
+    if(fieldlinesCheckbox!==null)
+        fieldlinesCheckbox.addEventListener('change', stateFromUi);
+    if(solverDropdown !== null)
+        solverDropdown.addEventListener('change', stateFromUi);
+    if(potentialCheckbox !== null)
+        potentialCheckbox.addEventListener('change', stateFromUi);
 
     updateSolverType();
 
-    let animation_request_id = null;
-    let last_time = null;
-
-    if(solverDropdown !== null)
-        solverDropdown.addEventListener('change', () => {
-            if(animation_request_id!==null)
-                window.cancelAnimationFrame(animation_request_id);
-            animation_request_id = null;
-            last_time = null;
-            updateSolverType();
-            drawVectorField();
-        });
-
-    if(potentialCheckbox !== null)
-        potentialCheckbox.addEventListener('change', () => {
-            showPotential = potentialCheckbox.checked;
-            drawVectorField();
-        });
+    
+    
 
     function stateToJson() {
         let charges_normalized_coordinates = charges.map(charge => {
@@ -145,7 +183,8 @@ export async function main(params) {
         return JSON.stringify({
             charges: charges_normalized_coordinates,
             solver: solver,
-            show_potential: showPotential
+            showPotential: showPotential,
+            plotType: plotType
         });
     }
 
@@ -164,8 +203,14 @@ export async function main(params) {
             if(potentialCheckbox !== null)
                 potentialCheckbox.checked = state.show_potential;
             
-            showPotential = state.show_potential;
-            updateSolverType(state.solver);
+            showPotential = state.showPotential;
+
+            if(state.plotType)
+                plotType = state.plotType;
+
+            solver = state.solver;
+
+            updateSolverType();
 
             return true;
         } else {
@@ -173,6 +218,7 @@ export async function main(params) {
         }
     }
 
+   
     if(copyJsonButton !== null)
         copyJsonButton.addEventListener('click', () => {
             const json = stateToJson();
@@ -502,8 +548,10 @@ export function initialize_on_existing_dom() {
         const addPositiveChargeButton = document.getElementById('addPositiveCharge');
         const clearChargesButton = document.getElementById('clearCharges');
         const solverDropdown = document.getElementById('solver');
-        const potentialControlsDiv = document.getElementById('show-potential-control')
+        const potentialControlsDiv = document.getElementById('show-potential-control');
+        const fieldlinesControlsDiv = document.getElementById('fieldlines-control');
         const potentialCheckbox = document.getElementById('potential');
+        const fieldlinesCheckbox = document.getElementById('fieldlines');
         const copyJsonButton = document.getElementById('copyJson');
         const pasteJsonButton = document.getElementById('pasteJson');
         const chargeOrCurrentSpans = document.querySelectorAll('.charge-or-current');
@@ -516,6 +564,7 @@ export function initialize_on_existing_dom() {
 
         const params = {
             canvas, addPositiveChargeButton, clearChargesButton, solverDropdown, potentialControlsDiv,
+            fieldlinesControlsDiv, fieldlinesCheckbox, 
             potentialCheckbox, copyJsonButton, pasteJsonButton, chargeOrCurrentSpans, chargePropertiesDiv,
             startingState, allowEditChargeStrength, allowAddDeleteCharge
         }
