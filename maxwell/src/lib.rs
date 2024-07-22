@@ -427,13 +427,6 @@ pub fn compute_field_electrostatic_direct_to_buffer(field_configuration: &FieldC
     buffer[1] = v;
 }
 
-#[wasm_bindgen]
-pub fn compute_field_electrostatic_direct_to_buffer(field_configuration: &FieldConfiguration, x: f64, y: f64, buffer: &mut [f64]) {
-    let Pair { u, v } = compute_field_electrostatic_direct(field_configuration, x, y);
-    buffer[0] = u;
-    buffer[1] = v;
-}
-
 
 #[wasm_bindgen]
 pub fn compute_field_magnetostatic_direct(field_configuration: &FieldConfiguration, x: f64, y:f64) -> Pair {
