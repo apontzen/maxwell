@@ -88,16 +88,18 @@
     <div class="controls">
         <label for="solver">Solver:</label>
         <select id="solver">
-            <option value="electrostatic_direct" selected>Electrostatic vectors [3D in-plane]</option>
-            <option value="electrostatic_direct_fieldline">Electrostatic fieldlines [3D in-plane]</option>
-            <option value="electrostatic_fourier">Electrostatic vectors [2D]</option>
+            <option value="electrostatic_direct" selected>Electrostatic [3D in-plane]</option>
+            <option value="electrostatic_fourier">Electrostatic [2D]</option>
             <option value="dynamic">Dynamic electric field [2D]</option>
-            <option value="magnetostatic_direct">Magentostatic vectors</option>
-            <option value="magnetostatic_direct_fieldline">Magentostatic fieldlines</option>
+            <option value="magnetostatic_direct">Magentostatic</option>
         </select>
         <span id='show-potential-control'>
             <label for="potential">Show potential:</label>
             <input type="checkbox" id="potential">
+        </span>
+        <span id='fieldlines-control'>
+            <label for="potential">Fieldlines:</label>
+            <input type="checkbox" id="fieldlines">
         </span>
         <button id="addPositiveCharge">Add <span class="charge_or_current">Charge</span></button>
         <button id="clearCharges">Clear</button>
