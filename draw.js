@@ -7,17 +7,20 @@ const maxArrowLength = 40;
 
 export const chargeSize = 10;
 
-export function getChargeFromPoint(charges, x, y, allowRadius) {
-    if (allowRadius == null) 
-        allowRadius = chargeSize;
-    else
-        allowRadius += chargeSize;
+export function getChargeFromPoint(charges, x, y, allowRadius, addChargeSize=true, excludeCharge=null) {
+    if(addChargeSize) {
+        if (allowRadius == null) 
+            allowRadius = chargeSize;
+        else
+            allowRadius += chargeSize;
+    }
+
     for (let i = charges.length - 1; i >= 0; i--) {
         // go in reverse order so that the charge on top is selected first
         const charge = charges[i];
         const dx = x - charge.x;
         const dy = y - charge.y;
-        if (Math.sqrt(dx * dx + dy * dy) < allowRadius) {
+        if (Math.sqrt(dx * dx + dy * dy) < allowRadius && charge !== excludeCharge) {
             return charge;
         }
     }

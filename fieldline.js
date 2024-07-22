@@ -363,9 +363,9 @@ export function drawElectrostaticFieldLines(charges, field, ctx, rect, chargeSiz
 
             let buffer = new Float64Array(2);
 
-            while((length_covered<20 || getChargeFromPoint(charges, stream_x, stream_y) === null)
+            while((getChargeFromPoint(charges, stream_x, stream_y, step_size*2.0, false, charge) === null)
                 && (stream_x>-rect.width && stream_y>-rect.height && stream_x<2*rect.width && stream_y<2*rect.height)
-                && n_steps<5000) {
+                && length_covered<5000.0) {
                 n_steps++;
 
                 compute_field_electrostatic_direct_to_buffer(field, stream_x, stream_y, buffer);
@@ -373,7 +373,7 @@ export function drawElectrostaticFieldLines(charges, field, ctx, rect, chargeSiz
                 let v = buffer[1];
                 let norm = Math.sqrt(u * u + v * v);
 
-                if (norm<1e-4) {
+                if (norm<1e-8) {
                     // to prevent numerical instability in low field regions, keep moving
                     // in the same direction
                     u = u_last;
@@ -407,7 +407,7 @@ export function drawElectrostaticFieldLines(charges, field, ctx, rect, chargeSiz
             
 
 
-            let landed_charge = getChargeFromPoint(charges, stream_x, stream_y);
+            let landed_charge = getChargeFromPoint(charges, stream_x, stream_y, step_size*2.0, false, charge);
 
 
             if (landed_charge !== null) {
