@@ -578,7 +578,7 @@ export function embed() {
     window.addEventListener('load', () => {
         const all_memes = document.querySelectorAll('meme-embed');
         all_memes.forEach(meme => {
-            const canvas = meme.appendChild(document.createElement('canvas'));
+            meme.style.position ='relative';
             const startingState = meme.getAttribute('meme');
 
             let fieldlinesControlsDiv = null;
@@ -586,19 +586,35 @@ export function embed() {
 
             if(meme.getAttribute('fieldlines-checkbox')) {
                 fieldlinesControlsDiv = document.createElement('div');
+                // shrink the meme-embed div to fit the canvas
+                meme.style.display = 'inline-block';
+
+                fieldlinesControlsDiv.style.position = 'absolute';
+                fieldlinesControlsDiv.style.zIndex = '1';
+                fieldlinesControlsDiv.style.bottom = '0';
+                fieldlinesControlsDiv.style.left = '0';
+                
+                fieldlinesControlsDiv.style.backgroundColor = 'rgba(255, 255, 255, 0.8)';
+                fieldlinesControlsDiv.style.padding = '5px';
+                fieldlinesControlsDiv.style.border = '1px solid grey';
+                fieldlinesControlsDiv.style.borderRadius = '4px';
+
 
                 fieldlinesCheckbox = document.createElement('input');
                 fieldlinesCheckbox.type = 'checkbox';
                 fieldlinesCheckbox.checked = false;
+                fieldlinesCheckbox.id = 'fieldlines-' + Math.random().toString(36).substring(7);
                 fieldlinesControlsDiv.appendChild(fieldlinesCheckbox);
                 
                 const fieldlinesLabel = document.createElement('label');
-                fieldlinesLabel.htmlFor = 'fieldlines';
-                fieldlinesLabel.textContent = 'Fieldlines';
+                fieldlinesLabel.htmlFor = fieldlinesCheckbox.id;
+                fieldlinesLabel.textContent = ' Show fieldlines';
                 fieldlinesControlsDiv.appendChild(fieldlinesLabel);
 
                 meme.appendChild(fieldlinesControlsDiv);
             }
+
+            const canvas = meme.appendChild(document.createElement('canvas'));
 
 
             const params = {
