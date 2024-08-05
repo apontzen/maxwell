@@ -130,13 +130,13 @@ export async function main(params) {
         if(fieldlinesCheckbox !== null)
             plotType = fieldlinesCheckbox.checked ? 'fieldline' : 'quiver';
 
-        updateSolverType();
+        updateSolverType(true);
 
     }
 
 
 
-    function updateSolverType() {
+    function updateSolverType(is_user_update = false) {
         field = new FieldConfiguration(rect.width, rect.height, cic_resolution, cic_resolution);
         
         dynamic = solver === 'dynamic';
@@ -151,14 +151,12 @@ export async function main(params) {
             console.error('Unknown solver type');
         }
 
-        console.log(dynamic);
-
         uiFromState(); // e.g. updates visibility of potential checkbox
 
         if(dynamic)
             animation_request_id = window.requestAnimationFrame(tickField);
         else
-            drawVectorField();
+            drawVectorField(is_user_update);
     }
 
     if(fieldlinesCheckbox!==null)
@@ -239,7 +237,10 @@ export async function main(params) {
         // Load the state from local storage if it exists
         const savedState = localStorage.getItem('maxwell_state');
         if (savedState) {
+            console.log("Restoring saved state", savedState);
             jsonToState(savedState);
+        } else {
+            console.log("No saved state found");
         }
     }
 

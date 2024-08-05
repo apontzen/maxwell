@@ -5,7 +5,7 @@ const DEBUG_MESSAGES = false; // Warning: can generate a LOT of console output!
 
 function debug_log(...message) {
     if(DEBUG_MESSAGES) {
-        console.log(...message);
+        console.debug(...message);
     }
 }
 class MultiStreamDepartures {
@@ -275,7 +275,7 @@ function initialiseFieldlineDrawingInfo(charges) {
             } else {
                 currentCharge.angle = Math.atan2(dy, dx);
             }
-            currentCharge.score = Math.sqrt(dx * dx + dy * dy);
+            currentCharge.score = Math.sqrt(dx * dx + dy * dy)/Math.pow(currentCharge.charge,2);
             currentCharge.processed = false;
             currentCharge.departures = new MultiStreamDepartures(Math.abs(currentCharge.charge) * 4, currentCharge.angle);
         }
