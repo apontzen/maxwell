@@ -597,7 +597,7 @@ export function embed() {
                 
                 fieldlinesControlsDiv.style.backgroundColor = 'rgba(255, 255, 255, 0.8)';
                 fieldlinesControlsDiv.style.padding = '5px';
-                fieldlinesControlsDiv.style.border = '1px solid grey';
+                fieldlinesControlsDiv.style.border = '1px solid white';
                 fieldlinesControlsDiv.style.borderRadius = '4px';
 
 
