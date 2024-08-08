@@ -42,7 +42,7 @@ function drawCharges(ctx, charges, selectedCharge) {
         ctx.arc(charge.x, charge.y, chargeSize, 0, 2 * Math.PI, false);
         ctx.fillStyle = charge.charge > 0 ? 'red' : 'blue';
         ctx.fill();
-        changeLineStyleIfSelected(charge, selectedCharge);
+        changeLineStyleIfSelected(ctx, charge, selectedCharge);
         ctx.stroke();
     });
 }
@@ -66,7 +66,7 @@ function drawCurrents(ctx, charges, selectedCharge) {
         ctx.arc(charge.x, charge.y, chargeSize, 0, 2 * Math.PI, false);
         ctx.fillStyle = 'white';
         ctx.fill();
-        changeLineStyleIfSelected(charge, selectedCharge);
+        changeLineStyleIfSelected(ctx, charge, selectedCharge);
         ctx.stroke();
         ctx.beginPath();
         if (charge.charge>0) {

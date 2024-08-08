@@ -590,16 +590,8 @@ export function embed() {
                 // shrink the meme-embed div to fit the canvas
                 meme.style.display = 'inline-block';
 
-                fieldlinesControlsDiv.style.position = 'absolute';
-                fieldlinesControlsDiv.style.zIndex = '1';
-                fieldlinesControlsDiv.style.bottom = '0';
-                fieldlinesControlsDiv.style.left = '0';
-                
-                fieldlinesControlsDiv.style.backgroundColor = 'rgba(255, 255, 255, 0.8)';
-                fieldlinesControlsDiv.style.padding = '5px';
-                fieldlinesControlsDiv.style.border = '1px solid white';
-                fieldlinesControlsDiv.style.borderRadius = '4px';
-
+                fieldlinesControlsDiv.className = 'fieldlines-controls';
+    
 
                 fieldlinesCheckbox = document.createElement('input');
                 fieldlinesCheckbox.type = 'checkbox';
