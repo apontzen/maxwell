@@ -4,10 +4,26 @@ import init, { compute_field_electrostatic_direct_to_buffer, compute_field_magne
 import { draw, getChargeFromPoint } from './draw.js';
 
 let isInitialized = false;
+let isInitializing = false;
 
-
-
-
+async function initialize() {
+    if(isInitialized) return;
+    if(isInitializing) {
+        await new Promise(resolve => {
+            const interval = setInterval(() => {
+                if (isInitialized) {
+                    clearInterval(interval);
+                    resolve();
+                }
+            }, 10);
+        });
+    } else {
+        isInitializing = true;
+        await init();
+        init_panic_hook();
+        isInitialized = true;
+    }
+}
 export async function main(params) {
 
     const {canvas, addPositiveChargeButton, clearChargesButton, solverDropdown,
@@ -15,11 +31,7 @@ export async function main(params) {
         chargeOrCurrentSpans, chargePropertiesDiv, startingState, fieldlinesControlsDiv,
         fieldlinesCheckbox, allowEditChargeStrength, allowAddDeleteCharge} = params;
         
-    if(!isInitialized) {
-        await init();
-        init_panic_hook();
-        isInitialized = true;
-    }
+    await initialize();
 
     const ctx = canvas.getContext('2d');
     
@@ -578,7 +590,7 @@ export function embed() {
     const meme = document.createElement('meme-embed');
     window.addEventListener('load', () => {
         const all_memes = document.querySelectorAll('meme-embed');
-        all_memes.forEach(meme => {
+        all_memes.forEach(meme =>  {
             meme.style.position ='relative';
             const startingState = meme.getAttribute('meme');
 
