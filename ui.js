@@ -459,7 +459,11 @@ export async function main(params) {
     function coordinatesFromMouseOrTouch(event) {
         if (event.touches) {
             const touch = event.touches[0];
-            return { offsetX: touch.pageX - canvas.offsetLeft, offsetY: touch.pageY - canvas.offsetTop };
+            const canvasRect = canvas.getBoundingClientRect();
+            const offsetTop  = canvasRect.top + window.scrollY;
+            const offsetLeft = canvasRect.left + window.scrollX;
+
+            return { offsetX: touch.pageX - offsetLeft, offsetY: touch.pageY - offsetTop };
         } else {
             return { offsetX: event.offsetX, offsetY: event.offsetY };
         }
