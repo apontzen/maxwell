@@ -1,6 +1,7 @@
 import { drawElectrostaticFieldLines, drawPotentialContours } from './fieldline.js';
 import { compute_field_electrostatic_direct_to_buffer, compute_field_magnetostatic_direct_to_buffer, 
-    compute_electric_field_dynamic_to_buffer} from './maxwell/out/maxwell.js';
+    compute_electric_field_dynamic_to_buffer, compute_field_electrostatic_per_charge_direct_to_buffer
+} from './maxwell/out/maxwell.js';
 
 
 const maxArrowLength = 40;
@@ -90,7 +91,17 @@ function drawCurrents(ctx, charges, selectedCharge) {
 function generateVectors(computeField, rect, charges, field) {
     const vectors = [];
     const step = 20;
-    let buffer = new Float64Array(2);
+    var buffer;
+    var n_per_point;
+    var color = 'black';
+    
+    if(computeField === compute_field_electrostatic_per_charge_direct_to_buffer) {
+        buffer = new Float64Array(2*charges.length);
+        n_per_point = charges.length;
+    } else {
+        buffer = new Float64Array(2);
+        n_per_point = 1;
+    }
 
     for (let x = step; x < rect.width; x += step) {
         for (let y = step; y < rect.height; y += step) {
@@ -101,7 +112,12 @@ function generateVectors(computeField, rect, charges, field) {
                 return Math.sqrt(dx * dx + dy * dy) < step;
             })) continue;
             computeField(field, x, y, buffer);
-            vectors.push({x, y, u: buffer[0], v: buffer[1]});
+            for (let i = 0; i < n_per_point; i++) {
+                if (n_per_point > 1) {
+                    color = charges[i].charge > 0 ? 'red' : 'blue';
+                }
+                vectors.push({x, y, u: buffer[0+2*i], v: buffer[1+2*i], color});
+            }
         }
     }
     
@@ -109,13 +125,15 @@ function generateVectors(computeField, rect, charges, field) {
 }
 
 function drawQuiverPlot(ctx, vectors) {
-    vectors.forEach(({x, y, u, v}) => {
-        drawArrow(ctx, x, y, u, v);
+    // ctx.globalCompositeOperation = 'multiply';  // -- ideally this would be good for the 'show per charge' option but it seems slow
+    vectors.forEach(({x, y, u, v, color}) => {
+        drawArrow(ctx, x, y, u, v, color);
     });
+    // ctx.globalCompositeOperation = 'source-over';
 }
 
 
-function drawArrow(ctx, x, y, u, v) {
+function drawArrow(ctx, x, y, u, v, color='black') {
     let arrowLength = Math.sqrt(u * u + v * v);
     const angle = Math.atan2(v, u);
 
@@ -129,7 +147,7 @@ function drawArrow(ctx, x, y, u, v) {
     y-=v/2;
 
     ctx.lineWidth = 1;
-    ctx.strokeStyle = 'black';
+    ctx.strokeStyle = color;
 
     ctx.beginPath();
     ctx.moveTo(x, y);
@@ -137,7 +155,7 @@ function drawArrow(ctx, x, y, u, v) {
     ctx.stroke();
 
     ctx.beginPath();
-    ctx.fillStyle = 'black';
+    ctx.fillStyle = color;
     ctx.moveTo(x + u, y + v);
     ctx.lineTo(x + u - arrowLength * 0.2 * Math.cos(angle - Math.PI / 6), y + v - arrowLength * 0.2 * Math.sin(angle - Math.PI / 6));
     ctx.lineTo(x + u - arrowLength * 0.2 * Math.cos(angle + Math.PI / 6), y + v - arrowLength * 0.2 * Math.sin(angle + Math.PI / 6));

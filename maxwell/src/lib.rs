@@ -401,7 +401,13 @@ pub fn compute_potential_electrostatic_direct(field_configuration: &FieldConfigu
     potential
 }
 
-
+fn compute_field_electrostatic_direct_one_charge(charge: &Charge, x: f64, y: f64) -> Pair {
+    let dx = x - charge.x;
+    let dy = y - charge.y;
+    let r = (dx * dx + dy * dy + SOFTEN).sqrt();
+    let k = FIELD_SCALING * charge.charge;
+    Pair { u: k * dx / (r * r * r), v: k * dy / (r * r * r) }
+}
 
 #[wasm_bindgen]
 pub fn compute_field_electrostatic_direct(field_configuration: &FieldConfiguration, x: f64, y: f64) -> Pair {
@@ -410,12 +416,9 @@ pub fn compute_field_electrostatic_direct(field_configuration: &FieldConfigurati
     
 
     for charge in &field_configuration.charges {
-        let dx = x - charge.x;
-        let dy = y - charge.y;
-        let r = (dx * dx + dy * dy + SOFTEN).sqrt();
-        let k = FIELD_SCALING * charge.charge;
-        u += k * dx / (r * r * r);
-        v += k * dy / (r * r * r);
+        let Pair { u: u_i, v: v_i } = compute_field_electrostatic_direct_one_charge(charge, x, y);
+        u += u_i;
+        v += v_i;
     }
     Pair { u, v }
 }
@@ -427,6 +430,16 @@ pub fn compute_field_electrostatic_direct_to_buffer(field_configuration: &FieldC
     buffer[1] = v;
 }
 
+#[wasm_bindgen]
+pub fn compute_field_electrostatic_per_charge_direct_to_buffer(field_configuration: &FieldConfiguration, x: f64, y: f64, buffer: &mut [f64]) {
+    let mut offset = 0;
+    for charge in 0..field_configuration.charges.len() {
+        let Pair { u, v } = compute_field_electrostatic_direct_one_charge(&field_configuration.charges[charge], x, y);
+        buffer[offset] = u;
+        buffer[offset+1] = v;
+        offset += 2;
+    }
+}
 
 #[wasm_bindgen]
 pub fn compute_field_magnetostatic_direct(field_configuration: &FieldConfiguration, x: f64, y:f64) -> Pair {

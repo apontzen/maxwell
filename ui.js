@@ -1,4 +1,5 @@
-import init, { compute_field_electrostatic_direct_to_buffer, compute_field_magnetostatic_direct_to_buffer,
+import init, { compute_field_electrostatic_direct_to_buffer, compute_field_magnetostatic_direct_to_buffer, 
+    compute_field_electrostatic_per_charge_direct_to_buffer,
     compute_electric_field_dynamic_to_buffer, init_panic_hook, FieldConfiguration } from './maxwell/out/maxwell.js';
 
 import { draw, getChargeFromPoint } from './draw.js';
@@ -29,7 +30,8 @@ export async function main(params) {
     const {canvas, addPositiveChargeButton, clearChargesButton, solverDropdown,
         potentialControlsDiv, potentialCheckbox, copyJsonButton, pasteJsonButton, 
         chargeOrCurrentSpans, chargePropertiesDiv, startingState, fieldlinesControlsDiv,
-        fieldlinesCheckbox, allowEditChargeStrength, allowAddDeleteCharge} = params;
+        fieldlinesCheckbox, allowEditChargeStrength, allowAddDeleteCharge, 
+        perChargeControlDiv, perChargeCheckbox} = params;
         
     await initialize();
 
@@ -74,6 +76,7 @@ export async function main(params) {
     let dynamic = false;
 
     let showPotential = false;
+    let perCharge = false;
     let solver = 'electrostatic_direct';
     
     let plotType = 'quiver';
@@ -83,8 +86,10 @@ export async function main(params) {
 
 
     function uiFromState() {
+        const allowPotential = solver === 'electrostatic_direct';
+
         if(potentialControlsDiv !== null) {
-            const allowPotential = solver === 'electrostatic_direct';
+            
             if(allowPotential) {
                 potentialControlsDiv.style.display = 'inline';
 
@@ -93,6 +98,16 @@ export async function main(params) {
 
             } else {
                 potentialControlsDiv.style.display = 'none';
+            }
+        }
+
+        if(perChargeControlDiv !== null) {
+            if(allowPotential) {
+                perChargeControlDiv.style.display = 'inline';
+                if(perChargeCheckbox !== null)
+                    perChargeCheckbox.checked = perCharge;
+            } else {
+                perChargeControlDiv.style.display = 'none';
             }
         }
 
@@ -142,6 +157,9 @@ export async function main(params) {
         if(fieldlinesCheckbox !== null)
             plotType = fieldlinesCheckbox.checked ? 'fieldline' : 'quiver';
 
+        if(perChargeCheckbox !== null)
+            perCharge = solver === 'electrostatic_direct' && perChargeCheckbox.checked;
+    
         updateSolverType(true);
 
     }
@@ -154,7 +172,11 @@ export async function main(params) {
         dynamic = solver === 'dynamic';
 
         if (solver === 'electrostatic_direct') {
-            computeField = compute_field_electrostatic_direct_to_buffer;
+            if(perCharge) {
+                computeField = compute_field_electrostatic_per_charge_direct_to_buffer;
+            } else {
+                computeField = compute_field_electrostatic_direct_to_buffer;
+            }
         } else if (solver === 'electrostatic_fourier' || solver === 'dynamic') {
             computeField = compute_electric_field_dynamic_to_buffer;
         } else if (solver === 'magnetostatic_direct') { 
@@ -177,6 +199,8 @@ export async function main(params) {
         solverDropdown.addEventListener('change', stateFromUi);
     if(potentialCheckbox !== null)
         potentialCheckbox.addEventListener('change', stateFromUi);
+    if(perChargeCheckbox !== null)
+        perChargeCheckbox.addEventListener('change', stateFromUi);
 
     updateSolverType();
 
@@ -194,7 +218,8 @@ export async function main(params) {
             charges: charges_normalized_coordinates,
             solver: solver,
             showPotential: showPotential,
-            plotType: plotType
+            plotType: plotType,
+            perCharge: perCharge
         });
     }
 
@@ -219,6 +244,8 @@ export async function main(params) {
                 plotType = state.plotType;
 
             solver = state.solver;
+
+            perCharge = state.perCharge;
 
             updateSolverType();
 
@@ -573,6 +600,8 @@ export function initialize_on_existing_dom() {
         const pasteJsonButton = document.getElementById('pasteJson');
         const chargeOrCurrentSpans = document.querySelectorAll('.charge-or-current');
         const chargePropertiesDiv = document.querySelector('.charge-properties');
+        const perChargeControlDiv = document.getElementById('per-charge-control');
+        const perChargeCheckbox = document.getElementById('per-charge');
 
         const startingState = null;
 
@@ -583,7 +612,7 @@ export function initialize_on_existing_dom() {
             canvas, addPositiveChargeButton, clearChargesButton, solverDropdown, potentialControlsDiv,
             fieldlinesControlsDiv, fieldlinesCheckbox, 
             potentialCheckbox, copyJsonButton, pasteJsonButton, chargeOrCurrentSpans, chargePropertiesDiv,
-            startingState, allowEditChargeStrength, allowAddDeleteCharge
+            startingState, allowEditChargeStrength, allowAddDeleteCharge, perChargeControlDiv, perChargeCheckbox
         }
         main(params);
 
@@ -600,6 +629,8 @@ export function embed() {
 
             let fieldlinesControlsDiv = null;
             let fieldlinesCheckbox = null;
+            let perChargeControlDiv = null;
+            let perChargeCheckbox = null;
 
             if(meme.getAttribute('fieldlines-checkbox')) {
                 fieldlinesControlsDiv = document.createElement('div');
@@ -623,6 +654,28 @@ export function embed() {
                 meme.appendChild(fieldlinesControlsDiv);
             }
 
+            if(meme.getAttribute('percharge-checkbox')) {
+                perChargeControlDiv = document.createElement('div');
+                // shrink the meme-embed div to fit the canvas
+                meme.style.display = 'inline-block';
+
+                perChargeControlDiv.className = 'fieldlines-controls';
+    
+
+                perChargeCheckbox = document.createElement('input');
+                perChargeCheckbox.type = 'checkbox';
+                perChargeCheckbox.checked = false;
+                perChargeCheckbox.id = 'percharge-' + Math.random().toString(36).substring(7);
+                perChargeControlDiv.appendChild(perChargeCheckbox);
+                
+                const perChargeLabel = document.createElement('label');
+                perChargeLabel.htmlFor = perChargeCheckbox.id;
+                perChargeLabel.textContent = 'Separate fields';
+                perChargeControlDiv.appendChild(perChargeLabel);
+
+                meme.appendChild(perChargeControlDiv);
+            }
+
             const canvas = meme.appendChild(document.createElement('canvas'));
 
 
@@ -630,7 +683,7 @@ export function embed() {
                 canvas, addPositiveChargeButton: null, clearChargesButton: null, solverDropdown: null, potentialControlsDiv: null,
                 potentialCheckbox: null, copyJsonButton: null, pasteJsonButton: null, chargeOrCurrentSpans: null, chargePropertiesDiv: null,
                 startingState: startingState, allowEditChargeStrength: false, allowAddDeleteCharge: false,
-                fieldlinesControlsDiv, fieldlinesCheckbox
+                fieldlinesControlsDiv, fieldlinesCheckbox, perChargeControlDiv, perChargeCheckbox
             }
             main(params);
         });
