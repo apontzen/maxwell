@@ -75,6 +75,8 @@ pub struct FieldConfiguration {
     mag_z_integral: Option<Array2<f64>>, /// Bz field integrated over time, for use in the PML boundary conditions
     stencils: stencil::Stencils,
     charge_normalization: f64,
+    elec_uniform_x: f64,
+    elec_uniform_y: f64
 }
 
 pub fn evaluate_grid(field: &Array2<f64>, x: isize, y: isize) -> f64 {
@@ -147,7 +149,8 @@ impl FieldConfiguration {
         let charge_normalization = 4000.0 / cell_area;
         FieldConfiguration { charges: vec![], charges_at_last_tick: vec![], geometry, 
             cic_grid: None, elec_x: None, elec_y: None, mag_z: None, mag_z_integral: None, current_x: None, current_y: None,
-            stencils: stencil::Stencils::new(geometry_clone), charge_normalization }
+            stencils: stencil::Stencils::new(geometry_clone), charge_normalization, 
+            elec_uniform_x: 0.0, elec_uniform_y: 0.0 }
     }
 
     pub fn set_charges(&mut self, charges: JsValue) {
@@ -158,6 +161,11 @@ impl FieldConfiguration {
                 vec![]
             }
         };
+    }
+
+    pub fn set_uniform_field(&mut self, x: f64, y: f64) {
+        self.elec_uniform_x = x;
+        self.elec_uniform_y = y;
     }
 
     pub fn reset_fields(&mut self) {
@@ -370,7 +378,7 @@ impl FieldConfiguration {
         self.ensure_initialized();
         let elec_x = evaluate_grid_interpolated_or_0(self, &self.elec_x, x, y);
         let elec_y = evaluate_grid_interpolated_or_0(self, &self.elec_y, x, y);
-        (elec_x, elec_y)
+        (elec_x + self.elec_uniform_x, elec_y + self.elec_uniform_y)
     }
 
     pub fn closest_charge(&self, x: f64, y: f64) -> Option<&Charge> {
@@ -411,8 +419,8 @@ fn compute_field_electrostatic_direct_one_charge(charge: &Charge, x: f64, y: f64
 
 #[wasm_bindgen]
 pub fn compute_field_electrostatic_direct(field_configuration: &FieldConfiguration, x: f64, y: f64) -> Pair {
-    let mut u: f64 = 0.0;
-    let mut v: f64 = 0.0;
+    let mut u: f64 = field_configuration.elec_uniform_x;
+    let mut v: f64 = field_configuration.elec_uniform_y;
     
 
     for charge in &field_configuration.charges {

@@ -42,6 +42,9 @@ export async function main(params) {
     let draggingCharge = null;
     let draggingOffsetX = 0;
     let draggingOffsetY = 0;
+    
+    let uniformElecX = 0.0;
+    let uniformElecY = 0.0;
 
     let nextChargeStrength = 1;
     let cic_resolution = 128;
@@ -219,7 +222,10 @@ export async function main(params) {
             solver: solver,
             showPotential: showPotential,
             plotType: plotType,
-            perCharge: perCharge
+            perCharge: perCharge,
+            // for information about the scaling of the uniform field, see jsonToState
+            uniformElecX: uniformElecX * rect.height, 
+            uniformElecY: uniformElecY * rect.width
         });
     }
 
@@ -242,6 +248,16 @@ export async function main(params) {
 
             if(state.plotType)
                 plotType = state.plotType;
+
+            // The below scaling looks weird but it is motivated by allowing a line
+            // of a fixed number of charges to cancel out the uniform field. This
+            // means the electric field needs to scale inversely with the perpendicular
+            // dimension.
+            if(state.uniformElecX)
+                uniformElecX = state.uniformElecX / rect.height;
+
+            if(state.uniformElecY)
+                uniformElecY = state.uniformElecY / rect.width;
 
             solver = state.solver;
 
@@ -324,6 +340,7 @@ export async function main(params) {
 
     function drawVectorField(user_update = true) {
         field.set_charges(charges);
+        field.set_uniform_field(uniformElecX, uniformElecY);
 
         if(!dynamic) {
             field.reset_fields();
