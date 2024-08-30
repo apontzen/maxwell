@@ -255,9 +255,13 @@ export async function main(params) {
             // dimension.
             if(state.uniformElecX)
                 uniformElecX = state.uniformElecX / rect.height;
+            else
+                uniformElecX = 0.0;
 
             if(state.uniformElecY)
                 uniformElecY = state.uniformElecY / rect.width;
+            else
+                uniformElecY = 0.0;
 
             solver = state.solver;
 

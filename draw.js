@@ -169,8 +169,8 @@ export function draw(ctx, rect, charges, field, fieldVisType, computeField, show
 
     if (showPotential) {
         drawPotentialContours(field, [0], ctx, 'grey');
-        drawPotentialContours(field, [125., 250., 500., 1000.], ctx, 'blue');
-        drawPotentialContours(field, [-125., -250., -500., -1000.], ctx, 'red');
+        drawPotentialContours(field, [250., 500., 750., 1000., 1250., 1500.,], ctx, 'blue');
+        drawPotentialContours(field, [-250., -500.,-750., -1000., -1250., -1500.], ctx, 'red');
     }
 
     if (fieldVisType === 'quiver') {
