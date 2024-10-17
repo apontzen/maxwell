@@ -3,10 +3,8 @@ import { compute_field_electrostatic_direct_to_buffer, compute_field_magnetostat
     compute_electric_field_dynamic_to_buffer, compute_field_electrostatic_per_charge_direct_to_buffer
 } from './maxwell/out/maxwell.js';
 
-
-const maxArrowLength = 40;
-
 export const chargeSize = 10;
+const forceScaling = 80;
 
 export function getChargeFromPoint(charges, x, y, allowRadius, addChargeSize=true, excludeCharge=null) {
     if(addChargeSize) {
@@ -28,7 +26,14 @@ export function getChargeFromPoint(charges, x, y, allowRadius, addChargeSize=tru
     return null;
 }
 
-function drawChargesOrCurrents(ctx, charges, computeField, selectedCharge) {
+function drawChargesOrCurrents(ctx, charges, computeField, selectedCharge, forces) {
+    if (forces !== null) {
+        for (let i = 0; i < charges.length && i < forces.length; i++) {
+            const charge = charges[i];
+            const force = forces[i];
+            drawArrow(ctx, charge.x, charge.y, forceScaling*force.u, forceScaling*force.v, 'purple', 2, 300, 20, false);
+        }
+    }
     if (computeField === compute_field_magnetostatic_direct_to_buffer) {
         drawCurrents(ctx, charges, selectedCharge);
     } else {
@@ -133,20 +138,28 @@ function drawQuiverPlot(ctx, vectors) {
 }
 
 
-function drawArrow(ctx, x, y, u, v, color='black') {
+function drawArrow(ctx, x, y, u, v, color='black', linewidth=1, arrowLengthLimit=40, maxArrowHeadLength=8, centred=true) {
     let arrowLength = Math.sqrt(u * u + v * v);
     const angle = Math.atan2(v, u);
 
-    if(arrowLength > maxArrowLength) {
-        u = u / arrowLength * maxArrowLength;
-        v = v / arrowLength * maxArrowLength;
-        arrowLength = maxArrowLength;
+    let arrowHeadLength = arrowLength * 0.2;
+    if(arrowHeadLength > maxArrowHeadLength) {
+        arrowHeadLength = maxArrowHeadLength;
     }
 
-    x-=u/2;
-    y-=v/2;
 
-    ctx.lineWidth = 1;
+    if(arrowLength > arrowLengthLimit) {
+        u = u / arrowLength * arrowLengthLimit;
+        v = v / arrowLength * arrowLengthLimit;
+        arrowLength = arrowLengthLimit;
+    }
+
+    if(centred) {
+        x-=u/2;
+        y-=v/2;
+    }
+
+    ctx.lineWidth = linewidth;
     ctx.strokeStyle = color;
 
     ctx.beginPath();
@@ -157,13 +170,13 @@ function drawArrow(ctx, x, y, u, v, color='black') {
     ctx.beginPath();
     ctx.fillStyle = color;
     ctx.moveTo(x + u, y + v);
-    ctx.lineTo(x + u - arrowLength * 0.2 * Math.cos(angle - Math.PI / 6), y + v - arrowLength * 0.2 * Math.sin(angle - Math.PI / 6));
-    ctx.lineTo(x + u - arrowLength * 0.2 * Math.cos(angle + Math.PI / 6), y + v - arrowLength * 0.2 * Math.sin(angle + Math.PI / 6));
+    ctx.lineTo(x + u - arrowHeadLength * Math.cos(angle - Math.PI / 6), y + v - arrowHeadLength * Math.sin(angle - Math.PI / 6));
+    ctx.lineTo(x + u - arrowHeadLength * Math.cos(angle + Math.PI / 6), y + v - arrowHeadLength * Math.sin(angle + Math.PI / 6));
     ctx.closePath();
     ctx.fill();
 }
 
-export function draw(ctx, rect, charges, field, fieldVisType, computeField, showPotential, selectedCharge) {
+export function draw(ctx, rect, charges, field, fieldVisType, computeField, showPotential, selectedCharge, forces) {
     ctx.clearRect(0, 0, rect.width, rect.height);
 
 
@@ -195,7 +208,7 @@ export function draw(ctx, rect, charges, field, fieldVisType, computeField, show
         console.error('Unknown field visualization type: ' + fieldVisType);
     }
 
-    drawChargesOrCurrents(ctx, charges, computeField, selectedCharge);
+    drawChargesOrCurrents(ctx, charges, computeField, selectedCharge, forces);
 }
 
     

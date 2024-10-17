@@ -1,6 +1,7 @@
 import init, { compute_field_electrostatic_direct_to_buffer, compute_field_magnetostatic_direct_to_buffer, 
     compute_field_electrostatic_per_charge_direct_to_buffer,
-    compute_electric_field_dynamic_to_buffer, init_panic_hook, FieldConfiguration } from './maxwell/out/maxwell.js';
+    compute_electric_field_dynamic_to_buffer, init_panic_hook, FieldConfiguration, 
+    compute_forces_electrostatic, compute_forces_magnetostatic} from './maxwell/out/maxwell.js';
 
 import { draw, getChargeFromPoint } from './draw.js';
 
@@ -31,7 +32,7 @@ export async function main(params) {
         potentialControlsDiv, potentialCheckbox, copyJsonButton, pasteJsonButton, 
         chargeOrCurrentSpans, chargePropertiesDiv, startingState, fieldlinesControlsDiv,
         fieldlinesCheckbox, allowEditChargeStrength, allowAddDeleteCharge, 
-        perChargeControlDiv, perChargeCheckbox} = params;
+        perChargeControlDiv, perChargeCheckbox, forcesCheckbox, forcesControlsDiv} = params;
         
     await initialize();
 
@@ -74,6 +75,8 @@ export async function main(params) {
     canvas.style.height = `${rect.height}px`;
 
     let computeField = compute_field_electrostatic_direct_to_buffer;
+    let computeForces = compute_forces_electrostatic;
+
     let field = null;
 
     let dynamic = false;
@@ -90,6 +93,15 @@ export async function main(params) {
 
     function uiFromState() {
         const allowPotential = solver === 'electrostatic_direct';
+        const allowForces = solver === 'electrostatic_direct' || solver === 'magnetostatic_direct';
+
+        if(forcesControlsDiv !== null) {
+            if(allowForces) {
+                forcesControlsDiv.style.display = 'inline';
+            } else {
+                forcesControlsDiv.style.display = 'none';
+            }
+        }
 
         if(potentialControlsDiv !== null) {
             
@@ -174,16 +186,20 @@ export async function main(params) {
         
         dynamic = solver === 'dynamic';
 
+        computeForces = null;
+
         if (solver === 'electrostatic_direct') {
             if(perCharge) {
                 computeField = compute_field_electrostatic_per_charge_direct_to_buffer;
             } else {
                 computeField = compute_field_electrostatic_direct_to_buffer;
             }
+            computeForces = compute_forces_electrostatic;
         } else if (solver === 'electrostatic_fourier' || solver === 'dynamic') {
             computeField = compute_electric_field_dynamic_to_buffer;
         } else if (solver === 'magnetostatic_direct') { 
             computeField = compute_field_magnetostatic_direct_to_buffer;
+            computeForces = compute_forces_magnetostatic;
         } else {
             console.error('Unknown solver type');
         }
@@ -198,6 +214,8 @@ export async function main(params) {
 
     if(fieldlinesCheckbox!==null)
         fieldlinesCheckbox.addEventListener('change', stateFromUi);
+    if(forcesCheckbox!==null)
+        forcesCheckbox.addEventListener('change', stateFromUi);
     if(solverDropdown !== null)
         solverDropdown.addEventListener('change', stateFromUi);
     if(potentialCheckbox !== null)
@@ -355,10 +373,15 @@ export async function main(params) {
             saveState();
         }
 
+        let forces = null;
+
+        if(forcesCheckbox!==null && forcesCheckbox.checked && computeForces !== null) {
+            forces = computeForces(field);
+        }
+
         draw(ctx, rect, charges, field, plotType, computeField, 
-            computeField === compute_field_electrostatic_direct_to_buffer && showPotential);
-
-
+            computeField === compute_field_electrostatic_direct_to_buffer && showPotential, null,
+            forces);
 
     }
 
@@ -623,6 +646,8 @@ export function initialize_on_existing_dom() {
         const chargePropertiesDiv = document.querySelector('.charge-properties');
         const perChargeControlDiv = document.getElementById('per-charge-control');
         const perChargeCheckbox = document.getElementById('per-charge');
+        const forcesCheckbox = document.getElementById('forces');
+        const forcesControlsDiv = document.getElementById('forces-control');
 
         const startingState = null;
 
@@ -633,7 +658,8 @@ export function initialize_on_existing_dom() {
             canvas, addPositiveChargeButton, clearChargesButton, solverDropdown, potentialControlsDiv,
             fieldlinesControlsDiv, fieldlinesCheckbox, 
             potentialCheckbox, copyJsonButton, pasteJsonButton, chargeOrCurrentSpans, chargePropertiesDiv,
-            startingState, allowEditChargeStrength, allowAddDeleteCharge, perChargeControlDiv, perChargeCheckbox
+            startingState, allowEditChargeStrength, allowAddDeleteCharge, perChargeControlDiv, perChargeCheckbox,
+            forcesCheckbox, forcesControlsDiv
         }
         main(params);
 
