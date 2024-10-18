@@ -431,6 +431,43 @@ pub fn compute_field_electrostatic_direct(field_configuration: &FieldConfigurati
     Pair { u, v }
 }
 
+pub fn compute_force_electrostatic(field_config: &FieldConfiguration, for_charge: i64) -> Pair {
+    let charge = &field_config.charges[for_charge as usize];
+    let mut u: f64 = 0.0;
+    let mut v: f64 = 0.0;
+    for other_charge in &field_config.charges {
+        if other_charge as *const Charge == charge as *const Charge {
+            continue;
+        }
+        let Pair { u: u_i, v: v_i } = compute_field_electrostatic_direct_one_charge(other_charge, charge.x, charge.y);
+        u += u_i;
+        v += v_i;
+    }
+    u*=charge.charge;
+    v*=charge.charge;
+    Pair { u, v }
+}
+
+#[wasm_bindgen]
+pub fn compute_forces_electrostatic(field_config: &FieldConfiguration) -> Vec<Pair> {
+    let mut forces = vec![];
+    for i in 0..field_config.charges.len() {
+        forces.push(compute_force_electrostatic(field_config, i as i64));
+    }
+    forces
+}
+
+#[wasm_bindgen]
+pub fn compute_forces_magnetostatic(field_config: &FieldConfiguration) -> Vec<Pair> {
+    let mut forces = compute_forces_electrostatic(field_config);
+    // negate the electric force components to get the magnetic force in the plane
+    for force in &mut forces {
+        force.u = -force.u;
+        force.v = -force.v;
+    }
+    forces
+}
+
 #[wasm_bindgen]
 pub fn compute_field_electrostatic_direct_to_buffer(field_configuration: &FieldConfiguration, x: f64, y: f64, buffer: &mut [f64]) {
     let Pair { u, v } = compute_field_electrostatic_direct(field_configuration, x, y);
