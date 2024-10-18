@@ -4,7 +4,7 @@ import { compute_field_electrostatic_direct_to_buffer, compute_field_magnetostat
 } from './maxwell/out/maxwell.js';
 
 export const chargeSize = 10;
-const forceScaling = 80;
+const forceScaling = 0.03;
 
 export function getChargeFromPoint(charges, x, y, allowRadius, addChargeSize=true, excludeCharge=null) {
     if(addChargeSize) {
@@ -27,11 +27,14 @@ export function getChargeFromPoint(charges, x, y, allowRadius, addChargeSize=tru
 }
 
 function drawChargesOrCurrents(ctx, charges, computeField, selectedCharge, forces) {
+    const width = ctx.canvas.clientWidth;
+
+
     if (forces !== null) {
         for (let i = 0; i < charges.length && i < forces.length; i++) {
             const charge = charges[i];
             const force = forces[i];
-            drawArrow(ctx, charge.x, charge.y, forceScaling*force.u, forceScaling*force.v, 'purple', 2, 300, 20, false);
+            drawArrow(ctx, charge.x, charge.y, forceScaling*width*force.u, forceScaling*width*force.v, 'purple', 2, width/2, 20, false);
         }
     }
     if (computeField === compute_field_magnetostatic_direct_to_buffer) {
