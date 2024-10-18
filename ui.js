@@ -666,6 +666,28 @@ export function initialize_on_existing_dom() {
     });
 }
 
+function addCheckbox(className, labelText, parentElement) {
+    parentElement.style.display = 'inline-block';
+    
+    const controlDiv = document.createElement('div');
+    controlDiv.className = className;
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = false;
+    checkbox.id = className + '-' + Math.random().toString(36).substring(7);
+    controlDiv.appendChild(checkbox);
+
+    const label = document.createElement('label');
+    label.htmlFor = checkbox.id;
+    label.textContent = labelText;
+    controlDiv.appendChild(label);
+
+    parentElement.appendChild(controlDiv);
+
+    return {div: controlDiv, checkbox};
+}
+
 export function embed() {
     const meme = document.createElement('meme-embed');
     window.addEventListener('load', () => {
@@ -678,50 +700,22 @@ export function embed() {
             let fieldlinesCheckbox = null;
             let perChargeControlDiv = null;
             let perChargeCheckbox = null;
+            let forcesControlsDiv = null;
+            let forcesCheckbox = null;
 
             if(meme.getAttribute('fieldlines-checkbox')) {
-                fieldlinesControlsDiv = document.createElement('div');
-                // shrink the meme-embed div to fit the canvas
-                meme.style.display = 'inline-block';
-
-                fieldlinesControlsDiv.className = 'fieldlines-controls';
-    
-
-                fieldlinesCheckbox = document.createElement('input');
-                fieldlinesCheckbox.type = 'checkbox';
-                fieldlinesCheckbox.checked = false;
-                fieldlinesCheckbox.id = 'fieldlines-' + Math.random().toString(36).substring(7);
-                fieldlinesControlsDiv.appendChild(fieldlinesCheckbox);
-                
-                const fieldlinesLabel = document.createElement('label');
-                fieldlinesLabel.htmlFor = fieldlinesCheckbox.id;
-                fieldlinesLabel.textContent = ' Show fieldlines';
-                fieldlinesControlsDiv.appendChild(fieldlinesLabel);
-
-                meme.appendChild(fieldlinesControlsDiv);
+                ({div: fieldlinesControlsDiv, checkbox: fieldlinesCheckbox} = addCheckbox('fieldlines-controls', 'Show field lines', meme));
             }
 
             if(meme.getAttribute('percharge-checkbox')) {
-                perChargeControlDiv = document.createElement('div');
-                // shrink the meme-embed div to fit the canvas
-                meme.style.display = 'inline-block';
-
-                perChargeControlDiv.className = 'fieldlines-controls';
-    
-
-                perChargeCheckbox = document.createElement('input');
-                perChargeCheckbox.type = 'checkbox';
-                perChargeCheckbox.checked = false;
-                perChargeCheckbox.id = 'percharge-' + Math.random().toString(36).substring(7);
-                perChargeControlDiv.appendChild(perChargeCheckbox);
-                
-                const perChargeLabel = document.createElement('label');
-                perChargeLabel.htmlFor = perChargeCheckbox.id;
-                perChargeLabel.textContent = 'Separate fields';
-                perChargeControlDiv.appendChild(perChargeLabel);
-
-                meme.appendChild(perChargeControlDiv);
+                ({div: perChargeControlDiv, checkbox: perChargeCheckbox} = addCheckbox('percharge-controls', 'Per charge', meme));
             }
+
+            if(meme.getAttribute('forces-checkbox')) {
+                ({div: forcesControlsDiv, checkbox: forcesCheckbox} = addCheckbox('forces-controls', 'Show forces', meme));
+            }
+
+
 
             const canvas = meme.appendChild(document.createElement('canvas'));
 
@@ -730,7 +724,7 @@ export function embed() {
                 canvas, addPositiveChargeButton: null, clearChargesButton: null, solverDropdown: null, potentialControlsDiv: null,
                 potentialCheckbox: null, copyJsonButton: null, pasteJsonButton: null, chargeOrCurrentSpans: null, chargePropertiesDiv: null,
                 startingState: startingState, allowEditChargeStrength: false, allowAddDeleteCharge: false,
-                fieldlinesControlsDiv, fieldlinesCheckbox, perChargeControlDiv, perChargeCheckbox
+                fieldlinesControlsDiv, fieldlinesCheckbox, perChargeControlDiv, perChargeCheckbox, forcesCheckbox, forcesControlsDiv
             }
             main(params);
         });
