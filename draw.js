@@ -4,7 +4,7 @@ import { compute_field_electrostatic_direct_to_buffer, compute_field_magnetostat
 } from './maxwell/out/maxwell.js';
 
 export const chargeSize = 10;
-const forceScaling = 0.03;
+const forceScaling = 0.1;
 
 export function getChargeFromPoint(charges, x, y, allowRadius, addChargeSize=true, excludeCharge=null) {
     if(addChargeSize) {
