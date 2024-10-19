@@ -1,5 +1,5 @@
 import init, { compute_field_electrostatic_direct_to_buffer, compute_field_magnetostatic_direct_to_buffer, 
-    compute_field_electrostatic_per_charge_direct_to_buffer,
+    compute_field_electrostatic_per_charge_direct_to_buffer, compute_field_magnetostatic_per_charge_direct_to_buffer, 
     compute_electric_field_dynamic_to_buffer, init_panic_hook, FieldConfiguration, 
     compute_forces_electrostatic, compute_forces_magnetostatic} from './maxwell/out/maxwell.js';
 
@@ -91,9 +91,15 @@ export async function main(params) {
     let last_time = null;
 
 
-    function uiFromState() {
+    function solverSupport(solver) {
         const allowPotential = solver === 'electrostatic_direct';
         const allowForces = solver === 'electrostatic_direct' || solver === 'magnetostatic_direct';
+        const allowPerCharge = allowForces;
+        return {allowPotential, allowForces, allowPerCharge};
+    }
+
+    function uiFromState() {
+        const {allowPotential, allowForces, allowPerCharge} = solverSupport(solver);
 
         if(forcesControlsDiv !== null) {
             if(allowForces) {
@@ -117,7 +123,7 @@ export async function main(params) {
         }
 
         if(perChargeControlDiv !== null) {
-            if(allowPotential) {
+            if(allowPerCharge) {
                 perChargeControlDiv.style.display = 'inline';
                 if(perChargeCheckbox !== null)
                     perChargeCheckbox.checked = perCharge;
@@ -166,6 +172,8 @@ export async function main(params) {
         if(solverDropdown !== null) 
             solver = solverDropdown.value;
 
+        const solverSupportInfo = solverSupport(solver);
+
         if(potentialCheckbox !== null)
             showPotential = potentialCheckbox.checked;
 
@@ -173,7 +181,7 @@ export async function main(params) {
             plotType = fieldlinesCheckbox.checked ? 'fieldline' : 'quiver';
 
         if(perChargeCheckbox !== null)
-            perCharge = solver === 'electrostatic_direct' && perChargeCheckbox.checked;
+            perCharge = solverSupportInfo.allowPerCharge && perChargeCheckbox.checked;
     
         updateSolverType(true);
 
@@ -198,7 +206,11 @@ export async function main(params) {
         } else if (solver === 'electrostatic_fourier' || solver === 'dynamic') {
             computeField = compute_electric_field_dynamic_to_buffer;
         } else if (solver === 'magnetostatic_direct') { 
-            computeField = compute_field_magnetostatic_direct_to_buffer;
+            if(perCharge) {
+                computeField = compute_field_magnetostatic_per_charge_direct_to_buffer;
+            } else { 
+                computeField = compute_field_magnetostatic_direct_to_buffer;
+            }
             computeForces = compute_forces_magnetostatic;
         } else {
             console.error('Unknown solver type');

@@ -1,6 +1,7 @@
 import { drawElectrostaticFieldLines, drawPotentialContours } from './fieldline.js';
 import { compute_field_electrostatic_direct_to_buffer, compute_field_magnetostatic_direct_to_buffer, 
     compute_electric_field_dynamic_to_buffer, compute_field_electrostatic_per_charge_direct_to_buffer,
+    compute_field_magnetostatic_per_charge_direct_to_buffer, 
     compute_one_force_electrostatic, compute_one_force_magnetostatic
 } from './maxwell/out/maxwell.js';
 
@@ -39,7 +40,7 @@ function drawChargesOrCurrents(ctx, charges, computeField, selectedCharge, force
             drawForce(ctx, charge, force);
         }
     }
-    if (computeField === compute_field_magnetostatic_direct_to_buffer) {
+    if (computeField === compute_field_magnetostatic_direct_to_buffer || computeField === compute_field_magnetostatic_per_charge_direct_to_buffer) {
         drawCurrents(ctx, charges, selectedCharge);
     } else {
         drawCharges(ctx, charges, selectedCharge);
@@ -149,7 +150,7 @@ function generateVectors(computeField, rect, charges, field) {
     var n_per_point;
     var color = 'black';
     
-    if(computeField === compute_field_electrostatic_per_charge_direct_to_buffer) {
+    if(computeField === compute_field_electrostatic_per_charge_direct_to_buffer || computeField === compute_field_magnetostatic_per_charge_direct_to_buffer) {
         buffer = new Float64Array(2*charges.length);
         n_per_point = charges.length;
     } else {
