@@ -481,6 +481,7 @@ function drawArrowOnFieldline(ctx, field, x_steps, y_steps, i_start, i_end) {
 
 function drawDirectionArrow(x_position, y_position, u, v, ctx) {
     ctx.save();
+    ctx.strokeStyle = 'black';
     ctx.translate(x_position, y_position);
     ctx.rotate(Math.atan2(v, u));
     ctx.beginPath();

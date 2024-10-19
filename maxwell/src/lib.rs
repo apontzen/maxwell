@@ -35,7 +35,7 @@ pub fn init_panic_hook() {
 pub struct Charge {
     x: f64,
     y: f64,
-    charge: f64,
+    charge: f64
 }
 
 #[wasm_bindgen]
@@ -431,8 +431,8 @@ pub fn compute_field_electrostatic_direct(field_configuration: &FieldConfigurati
     Pair { u, v }
 }
 
-pub fn compute_force_electrostatic(field_config: &FieldConfiguration, for_charge: i64) -> Pair {
-    let charge = &field_config.charges[for_charge as usize];
+pub fn compute_force_electrostatic(field_config: &FieldConfiguration, for_charge: usize) -> Pair {
+    let charge = &field_config.charges[for_charge];
     let mut u: f64 = 0.0;
     let mut v: f64 = 0.0;
     for other_charge in &field_config.charges {
@@ -452,9 +452,21 @@ pub fn compute_force_electrostatic(field_config: &FieldConfiguration, for_charge
 pub fn compute_forces_electrostatic(field_config: &FieldConfiguration) -> Vec<Pair> {
     let mut forces = vec![];
     for i in 0..field_config.charges.len() {
-        forces.push(compute_force_electrostatic(field_config, i as i64));
+        forces.push(compute_force_electrostatic(field_config, i));
     }
     forces
+}
+
+#[wasm_bindgen]
+pub fn compute_one_force_electrostatic(field_config: &FieldConfiguration, x: f64, y: f64, charge: f64) -> Pair {
+    let Pair { u, v } = compute_field_electrostatic_direct(field_config, x, y);
+    Pair { u: u*charge, v: v*charge }
+}
+
+#[wasm_bindgen]
+pub fn compute_one_force_magnetostatic(field_config: &FieldConfiguration, x: f64, y: f64, charge: f64) -> Pair {
+    let Pair { u, v } = compute_field_magnetostatic_direct(field_config, x, y);
+    Pair { u: v*charge, v: -u*charge }
 }
 
 #[wasm_bindgen]

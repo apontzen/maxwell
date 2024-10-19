@@ -1,6 +1,7 @@
 import { drawElectrostaticFieldLines, drawPotentialContours } from './fieldline.js';
 import { compute_field_electrostatic_direct_to_buffer, compute_field_magnetostatic_direct_to_buffer, 
-    compute_electric_field_dynamic_to_buffer, compute_field_electrostatic_per_charge_direct_to_buffer
+    compute_electric_field_dynamic_to_buffer, compute_field_electrostatic_per_charge_direct_to_buffer,
+    compute_one_force_electrostatic, compute_one_force_magnetostatic
 } from './maxwell/out/maxwell.js';
 
 export const chargeSize = 10;
@@ -29,12 +30,13 @@ export function getChargeFromPoint(charges, x, y, allowRadius, addChargeSize=tru
 function drawChargesOrCurrents(ctx, charges, computeField, selectedCharge, forces) {
     const width = ctx.canvas.clientWidth;
 
+    const charges_no_test_charges = charges.filter(charge => !charge.isTestCharge);
 
     if (forces !== null) {
         for (let i = 0; i < charges.length && i < forces.length; i++) {
-            const charge = charges[i];
+            const charge = charges_no_test_charges[i];
             const force = forces[i];
-            drawArrow(ctx, charge.x, charge.y, forceScaling*width*force.u, forceScaling*width*force.v, 'purple', 2, width/2, 20, false);
+            drawForce(ctx, charge, force);
         }
     }
     if (computeField === compute_field_magnetostatic_direct_to_buffer) {
@@ -44,8 +46,33 @@ function drawChargesOrCurrents(ctx, charges, computeField, selectedCharge, force
     }
 }
 
+function drawForce(ctx, charge, force) {
+    drawArrow(ctx, charge.x, charge.y, force.u*forceScaling*ctx.canvas.clientWidth, force.v*forceScaling*ctx.canvas.clientWidth, 'purple', 2, ctx.canvas.clientWidth/2, 20, false);
+}
+
+function drawTestChargeForces(ctx, charges, computeField, field) {
+    charges.forEach(charge => {
+        if(charge.isTestCharge) {
+            let force;
+            if (computeField === compute_field_electrostatic_direct_to_buffer) {
+                force = compute_one_force_electrostatic(field, charge.x, charge.y, charge.charge);
+            }
+            else if (computeField === compute_field_magnetostatic_direct_to_buffer) {
+                force = compute_one_force_magnetostatic(field, charge.x, charge.y, charge.charge);
+            } else {
+                force = {u: 0, v: 0};
+            }
+
+            drawForce(ctx, charge, force);
+        }
+    });
+}
+
 function drawCharges(ctx, charges, selectedCharge) {
     charges.forEach(charge => {
+        if(charge.isTestCharge) {
+            ctx.globalAlpha = 0.5;
+        }
         
         ctx.beginPath();
         ctx.arc(charge.x, charge.y, chargeSize, 0, 2 * Math.PI, false);
@@ -53,6 +80,9 @@ function drawCharges(ctx, charges, selectedCharge) {
         ctx.fill();
         changeLineStyleIfSelected(ctx, charge, selectedCharge);
         ctx.stroke();
+        if(charge.isTestCharge) {
+            ctx.globalAlpha = 1;
+        }
     });
 }
 
@@ -71,16 +101,31 @@ function drawCurrents(ctx, charges, selectedCharge) {
     // circle with a dot in the centre. If current is negative, show as a circle with
     // a cross through it
     charges.forEach(charge => {
+        ctx.save();
+        if(charge.isTestCharge) { 
+            ctx.strokeStlye = 'purple';
+        } else {
+            ctx.strokeStyle = 'black';
+        }
+        ctx.lineWidth = 1;
+
         ctx.beginPath();
         ctx.arc(charge.x, charge.y, chargeSize, 0, 2 * Math.PI, false);
         ctx.fillStyle = 'white';
         ctx.fill();
-        changeLineStyleIfSelected(ctx, charge, selectedCharge);
+        // changeLineStyleIfSelected(ctx, charge, selectedCharge);
         ctx.stroke();
+
+        if(charge.isTestCharge) { 
+            ctx.fillStyle = 'purple';
+        } else {
+            ctx.fillStyle = 'black';
+        }
+
         ctx.beginPath();
         if (charge.charge>0) {
             ctx.arc(charge.x, charge.y, chargeSize / 4, 0, 2 * Math.PI, false);
-            ctx.fillStyle = 'black';
+            
             ctx.fill();
             ctx.stroke();
         } else if (charge.charge < 0) {
@@ -93,6 +138,7 @@ function drawCurrents(ctx, charges, selectedCharge) {
             ctx.lineTo(charge.x - chargeSize / 2, charge.y + chargeSize / 2);
             ctx.stroke();
         }
+        ctx.restore();
     });
 }
 
@@ -193,9 +239,10 @@ export function draw(ctx, rect, charges, field, fieldVisType, computeField, show
         const vectors = generateVectors(computeField, rect, charges, field);
         drawQuiverPlot(ctx, vectors);
     } else if (fieldVisType === 'fieldline' && computeField === compute_field_electrostatic_direct_to_buffer) {
+        const charges_no_test_charges = charges.filter(charge => !charge.isTestCharge);
         // The following algorithm only works when field lines start and end on charges, so perfect for the
         // electric case but not the magnetic case
-        drawElectrostaticFieldLines(charges, field, ctx, rect, chargeSize);
+        drawElectrostaticFieldLines(charges_no_test_charges, field, ctx, rect, chargeSize);
     } else if (fieldVisType === 'fieldline' && computeField === compute_field_magnetostatic_direct_to_buffer) {
         // Here we take cheeky advantage of the fact that the magnetostatic field lines are equivalent to
         // equipotential lines if we were solving an electrostatic problem. 
@@ -211,6 +258,7 @@ export function draw(ctx, rect, charges, field, fieldVisType, computeField, show
         console.error('Unknown field visualization type: ' + fieldVisType);
     }
 
+    drawTestChargeForces(ctx, charges, computeField, field);
     drawChargesOrCurrents(ctx, charges, computeField, selectedCharge, forces);
 }
 

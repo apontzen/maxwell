@@ -361,7 +361,8 @@ export async function main(params) {
     }
 
     function drawVectorField(user_update = true) {
-        field.set_charges(charges);
+        let charges_no_test_charges = charges.filter(c => !c.isTestCharge);
+        field.set_charges(charges_no_test_charges);
         field.set_uniform_field(uniformElecX, uniformElecY);
 
         if(!dynamic) {
@@ -397,16 +398,22 @@ export async function main(params) {
     
     let selectedCharge = null;
 
-    let chargeInput, chargeValue, deleteChargeBtn;
+    let chargeInput, chargeValue, deleteChargeBtn, testChargeTickbox;
 
     if(chargePropertiesDiv!==null) {
         chargeInput = chargePropertiesDiv.querySelector('.charge');
         chargeValue = chargePropertiesDiv.querySelector('.chargeValue');
         deleteChargeBtn = chargePropertiesDiv.querySelector('.deleteCharge');
+        testChargeTickbox = chargePropertiesDiv.querySelector('.testCharge');
 
         chargeInput.addEventListener('input', () => {
             selectedCharge.charge = parseInt(chargeInput.value);
             chargeValue.textContent = chargeInput.value;
+            drawVectorField();
+        });
+
+        testChargeTickbox.addEventListener('change', () => {
+            selectedCharge.isTestCharge = testChargeTickbox.checked;
             drawVectorField();
         });
 
@@ -430,6 +437,7 @@ export async function main(params) {
 
         chargeInput.value = charge.charge;
         chargeValue.textContent = chargeInput.value;
+        testChargeTickbox.checked = charge.isTestCharge;
         selectedCharge = charge;
 
         drawVectorField();
