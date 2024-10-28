@@ -5,6 +5,9 @@ import init, { compute_field_electrostatic_direct_to_buffer, compute_field_magne
 
 import { draw, getChargeFromPoint } from './draw.js';
 
+const DYNAMIC_RUNTIME_SECONDS = 10;
+const DYNAMIC_RUNTIME_MS = DYNAMIC_RUNTIME_SECONDS * 1000;
+
 let isInitialized = false;
 let isInitializing = false;
 
@@ -88,8 +91,25 @@ export async function main(params) {
     let plotType = 'quiver';
 
     let animation_request_id = null;
-    let last_time = null;
+    let last_time = null, last_interaction_time = null;
 
+    
+    function animationIsRunning() {
+        return animation_request_id !== null && dynamic;
+    }
+
+    function continueAnimation() {
+        if(dynamic && last_interaction_time !== null && (performance.now() - last_interaction_time) < DYNAMIC_RUNTIME_MS) {
+            animation_request_id = window.requestAnimationFrame(tickField);
+        }
+    }
+
+    function postUserInteraction() {
+        last_interaction_time = performance.now();
+        saveState();
+        if(!animationIsRunning())
+            animation_request_id = window.requestAnimationFrame(tickField);
+    }
 
     function solverSupport(solver) {
         const allowPotential = solver === 'electrostatic_direct';
@@ -218,10 +238,11 @@ export async function main(params) {
 
         uiFromState(); // e.g. updates visibility of potential checkbox
 
-        if(dynamic)
-            animation_request_id = window.requestAnimationFrame(tickField);
-        else
-            drawVectorField(is_user_update);
+        if(is_user_update) {
+            postUserInteraction();
+        } else if(!dynamic) {
+            drawVectorField();
+        }
     }
 
     if(fieldlinesCheckbox!==null)
@@ -367,24 +388,21 @@ export async function main(params) {
  
 
         // only request the next frame if we're still solving dynamically
-        if(dynamic)
-            animation_request_id = window.requestAnimationFrame(tickField);
+        
 
     }
 
-    function drawVectorField(user_update = true) {
+    function drawVectorField() {
         let charges_no_test_charges = charges.filter(c => !c.isTestCharge);
         field.set_charges(charges_no_test_charges);
         field.set_uniform_field(uniformElecX, uniformElecY);
 
         if(!dynamic) {
-            field.reset_fields();
             // if dynamic, the fields are being updated in real time and we don't want to reset them
+            // if not dynamic, we need to reset the fields to trigger a recompute
+            field.reset_fields();
         }
 
-        if(user_update) {
-            saveState();
-        }
 
         let forces = null;
 
@@ -395,6 +413,8 @@ export async function main(params) {
         draw(ctx, rect, charges, field, plotType, computeField, 
             computeField === compute_field_electrostatic_direct_to_buffer && showPotential, null,
             forces);
+
+        continueAnimation();
 
     }
 
@@ -600,8 +620,7 @@ export async function main(params) {
             event.preventDefault();
             draggingCharge.x = offsetX - draggingOffsetX;
             draggingCharge.y = offsetY - draggingOffsetY;
-            if(!dynamic)    
-                window.requestAnimationFrame(drawVectorField);
+            postUserInteraction();
         }
     }
 

@@ -348,9 +348,13 @@ impl FieldConfiguration {
             // Finally update the integral of Bz over time (which is just used for the PML damping, not anything physical)
             // Note that in tests I found neglecting the integral terms in the PML didn't make a huge difference to the
             // level of reflections (just a qualitative observation, not a rigorous test). Without the integral terms,
-            // it's pretty obviously just a local damping term.
+            // it's pretty obviously just a local damping term. 
+            // 
+            // In fact the PML term seems to be generating boundary artefacts, so I'm going to comment it out for now.
+            // Probably there is a bug but I don't have time to find it right now.
             
-            mag_z_integral[[i,j]] += mag_z[[i,j]] * delta_t;
+            
+            // mag_z_integral[[i,j]] += mag_z[[i,j]] * delta_t;
             
 
             
@@ -363,9 +367,9 @@ impl FieldConfiguration {
             elec_x[[i,j]] += (d_magz_dy - current_x[[i,j]]) * delta_t;
             elec_y[[i,j]] += (-d_magz_dx - current_y[[i,j]]) * delta_t;
             
-            // PML damping, as above:
-            let pml_x_term = -sigma_y * elec_x[[i, j]] + sigma_x * self.stencils.evaluate(&mag_z_integral, i, j, &stencil::StencilType::GradY, &stencil::DifferenceType::Backward);
-            let pml_y_term = -sigma_x * elec_y[[i, j]] - sigma_y * self.stencils.evaluate(&mag_z_integral, i, j, &stencil::StencilType::GradX, &stencil::DifferenceType::Backward) ;
+            // PML terms commented out, see above -- just a damping for now
+            let pml_x_term = -sigma_y * elec_x[[i, j]]; // + sigma_x * self.stencils.evaluate(&mag_z_integral, i, j, &stencil::StencilType::GradY, &stencil::DifferenceType::Backward);
+            let pml_y_term = -sigma_x * elec_y[[i, j]]; // - sigma_y * self.stencils.evaluate(&mag_z_integral, i, j, &stencil::StencilType::GradX, &stencil::DifferenceType::Backward) ;
             elec_x[[i,j]] += pml_x_term*delta_t;
             elec_y[[i,j]] += pml_y_term*delta_t;
         }
