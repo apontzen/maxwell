@@ -51,7 +51,9 @@ export async function main(params) {
     let uniformElecY = 0.0;
 
     let nextChargeStrength = 1;
-    let cic_resolution = 128;
+    let cic_max_resolution = 128;
+    let cic_target_logical_pixel_per_cell = 6;
+    let cic_resolution;
 
     const dpr = window.devicePixelRatio || 1;
 
@@ -210,6 +212,9 @@ export async function main(params) {
 
 
     function updateSolverType(is_user_update = false) {
+        cic_resolution = Math.min(cic_max_resolution, Math.max(1, Math.floor(rect.width / cic_target_logical_pixel_per_cell)));
+
+        console.debug('cic_resolution = ', cic_resolution);
         field = new FieldConfiguration(rect.width, rect.height, cic_resolution, cic_resolution);
         
         dynamic = solver === 'dynamic';
@@ -373,12 +378,14 @@ export async function main(params) {
 
         dt /= 5; // convert from ms to internal time units
 
+        const dx = rect.width / cic_resolution;
+
         // Try to get forward in time by dt, but abandon if it takes too long (more than 20ms)
         const performance_time_start = performance.now();
         const max_time_ms = 20.0;
 
         while (dt > 0.0 && performance.now() - performance_time_start < max_time_ms) {
-            const step = Math.min(0.5, dt);
+            const step = Math.min(0.1 * dx , dt);
             field.tick(step);
             dt -= step;
         }

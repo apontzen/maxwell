@@ -27,7 +27,6 @@ pub struct Pair {
 #[wasm_bindgen]
 pub fn init_panic_hook() {
     console_error_panic_hook::set_once();
-    console::log_1(&"Hello from Rust, panic hook has been initialised!".into());
 }
 
 #[wasm_bindgen]
@@ -326,6 +325,10 @@ impl FieldConfiguration {
         let mag_z_integral = self.mag_z_integral.as_mut().unwrap();
         let current_x = self.current_x.as_ref().unwrap();
         let current_y = self.current_y.as_ref().unwrap();
+
+        if (delta_t / self.geometry.delta_x()).abs() > 0.1 {
+            console::log_1(&(format!("Warning: timestep is large compared to grid cell size: {}", delta_t / self.geometry.delta_x())).into());
+        } 
 
 
         // Evolve Bz field first, to get it from half a tick behind to half a tick ahead of the E field
