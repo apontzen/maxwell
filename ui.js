@@ -35,7 +35,8 @@ export async function main(params) {
         potentialControlsDiv, potentialCheckbox, copyJsonButton, pasteJsonButton, 
         chargeOrCurrentSpans, chargePropertiesDiv, startingState, fieldlinesControlsDiv,
         fieldlinesCheckbox, allowEditChargeStrength, allowAddDeleteCharge, 
-        perChargeControlDiv, perChargeCheckbox, forcesCheckbox, forcesControlsDiv} = params;
+        perChargeControlDiv, perChargeCheckbox, forcesCheckbox, forcesControlsDiv,
+        dipoleControlsDiv, dipoleCheckbox} = params;
         
     await initialize();
 
@@ -89,6 +90,7 @@ export async function main(params) {
     let showPotential = false;
     let perCharge = false;
     let solver = 'electrostatic_direct';
+    let dipoleMode = false;
     
     let plotType = 'quiver';
 
@@ -173,6 +175,10 @@ export async function main(params) {
         if(potentialCheckbox !== null)
             potentialCheckbox.checked = showPotential;
 
+        if(dipoleCheckbox !== null) {
+            dipoleCheckbox.checked = dipoleMode;
+        }
+
         
 
         if(solver === 'magnetostatic_direct') {
@@ -204,6 +210,10 @@ export async function main(params) {
 
         if(perChargeCheckbox !== null)
             perCharge = solverSupportInfo.allowPerCharge && perChargeCheckbox.checked;
+
+        if(dipoleCheckbox !== null) {
+            dipoleMode = dipoleCheckbox.checked;
+        }
     
         updateSolverType(true);
 
@@ -260,6 +270,8 @@ export async function main(params) {
         potentialCheckbox.addEventListener('change', stateFromUi);
     if(perChargeCheckbox !== null)
         perChargeCheckbox.addEventListener('change', stateFromUi);
+    if(dipoleCheckbox !== null)
+        dipoleCheckbox.addEventListener('change', stateFromUi);
 
     updateSolverType();
 
@@ -281,7 +293,8 @@ export async function main(params) {
             perCharge: perCharge,
             // for information about the scaling of the uniform field, see jsonToState
             uniformElecX: uniformElecX * rect.height, 
-            uniformElecY: uniformElecY * rect.width
+            uniformElecY: uniformElecY * rect.width,
+            dipoleMode: dipoleMode
         });
     }
 
@@ -322,6 +335,8 @@ export async function main(params) {
             solver = state.solver;
 
             perCharge = state.perCharge;
+
+            dipoleMode = state.dipoleMode;
 
             updateSolverType();
 
@@ -419,7 +434,7 @@ export async function main(params) {
 
         draw(ctx, rect, charges, field, plotType, computeField, 
             computeField === compute_field_electrostatic_direct_to_buffer && showPotential, null,
-            forces);
+            forces, dipoleMode);
 
         continueAnimation();
 
@@ -625,8 +640,43 @@ export async function main(params) {
         const { offsetX, offsetY } = coordinatesFromMouseOrTouch(event);
         if (draggingCharge) {
             event.preventDefault();
+            let otherCharge, deltaX, deltaY, comX, comY;
+
+           
+            if(dipoleMode && draggingCharge.dipoleWith !== undefined) {
+                otherCharge = charges.find(c => c.id === draggingCharge.dipoleWith);
+                deltaX = otherCharge.x - draggingCharge.x;
+                deltaY = otherCharge.y - draggingCharge.y;
+                comX = (otherCharge.x + draggingCharge.x) / 2;
+                comY = (otherCharge.y + draggingCharge.y) / 2;
+            }
+
             draggingCharge.x = offsetX - draggingOffsetX;
             draggingCharge.y = offsetY - draggingOffsetY;
+
+            let fix_com = true;
+
+
+            if(otherCharge !== undefined) {
+                if(fix_com) {
+                    let newDeltaX = draggingCharge.x - comX;
+                    let newDeltaY = draggingCharge.y - comY;
+
+                    // normalize to same distance as original delta:
+                    let scale = Math.sqrt(deltaX * deltaX + deltaY * deltaY) / Math.sqrt(newDeltaX * newDeltaX + newDeltaY * newDeltaY);
+                    newDeltaX *= scale;
+                    newDeltaY *= scale;
+
+                    draggingCharge.x = comX + newDeltaX/2;
+                    draggingCharge.y = comY + newDeltaY/2;
+                    otherCharge.x = comX - newDeltaX/2;
+                    otherCharge.y = comY - newDeltaY/2;
+                } else {
+                    otherCharge.x = draggingCharge.x + deltaX;
+                    otherCharge.y = draggingCharge.y + deltaY;
+                }
+            }
+            
             postUserInteraction();
         }
     }
@@ -694,6 +744,8 @@ export function initialize_on_existing_dom() {
         const perChargeCheckbox = document.getElementById('per-charge');
         const forcesCheckbox = document.getElementById('forces');
         const forcesControlsDiv = document.getElementById('forces-control');
+        const dipoleControlsDiv = document.getElementById('dipole-control');
+        const dipoleCheckbox = document.getElementById('dipole');
 
         const startingState = null;
 
@@ -705,7 +757,7 @@ export function initialize_on_existing_dom() {
             fieldlinesControlsDiv, fieldlinesCheckbox, 
             potentialCheckbox, copyJsonButton, pasteJsonButton, chargeOrCurrentSpans, chargePropertiesDiv,
             startingState, allowEditChargeStrength, allowAddDeleteCharge, perChargeControlDiv, perChargeCheckbox,
-            forcesCheckbox, forcesControlsDiv
+            forcesCheckbox, forcesControlsDiv, dipoleControlsDiv, dipoleCheckbox
         }
         main(params);
 

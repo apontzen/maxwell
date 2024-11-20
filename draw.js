@@ -28,7 +28,7 @@ export function getChargeFromPoint(charges, x, y, allowRadius, addChargeSize=tru
     return null;
 }
 
-function drawChargesOrCurrents(ctx, charges, computeField, selectedCharge, forces) {
+function drawChargesOrCurrents(ctx, charges, computeField, selectedCharge, forces, dipoleMode) {
     const width = ctx.canvas.clientWidth;
 
     const charges_no_test_charges = charges.filter(charge => !charge.isTestCharge);
@@ -37,9 +37,25 @@ function drawChargesOrCurrents(ctx, charges, computeField, selectedCharge, force
         for (let i = 0; i < charges.length && i < forces.length; i++) {
             const charge = charges_no_test_charges[i];
             const force = forces[i];
-            drawForce(ctx, charge, force);
+            drawForce(ctx, charge.x, charge.y, force);
         }
     }
+    if(dipoleMode) {
+        charges.forEach(charge => {
+            if(charge.dipoleWith !== undefined) {
+                if(charge.dipoleWith > charge.id) {
+                    const otherCharge = charges.find(c => c.id === charge.dipoleWith);
+                    ctx.beginPath();
+                    ctx.moveTo(charge.x, charge.y);
+                    ctx.lineTo(otherCharge.x, otherCharge.y);
+                    ctx.strokeStyle = 'black';
+                    ctx.lineWidth = 1;
+                    ctx.stroke();
+                }
+            }
+        });
+    }
+
     if (computeField === compute_field_magnetostatic_direct_to_buffer || computeField === compute_field_magnetostatic_per_charge_direct_to_buffer) {
         drawCurrents(ctx, charges, selectedCharge);
     } else {
@@ -47,24 +63,92 @@ function drawChargesOrCurrents(ctx, charges, computeField, selectedCharge, force
     }
 }
 
-function drawForce(ctx, charge, force) {
-    drawArrow(ctx, charge.x, charge.y, force.u*forceScaling*ctx.canvas.clientWidth, force.v*forceScaling*ctx.canvas.clientWidth, 'purple', 2, ctx.canvas.clientWidth/2, 20, false);
+function drawForce(ctx, x, y, force) {
+    drawArrow(ctx, x, y, force.u*forceScaling*ctx.canvas.clientWidth, force.v*forceScaling*ctx.canvas.clientWidth, 'purple', 2, ctx.canvas.clientWidth/2, 20, false);
 }
 
-function drawTestChargeForces(ctx, charges, computeField, field) {
+function drawTorque(ctx, x_origin, y_origin, x_start, y_start, num_degrees) {
+    // Draw a circle segment to represent the torque, starting at x_start, y_start and going num_degrees clockwise around x_origin, y_origin
+    const radius = Math.sqrt((x_start - x_origin) ** 2 + (y_start - y_origin) ** 2);
+    const angle_start = Math.atan2(y_start - y_origin, x_start - x_origin);
+    const angle_end = angle_start + num_degrees * Math.PI / 180;
+
+    ctx.beginPath();
+    if(angle_start<angle_end) {
+        ctx.arc(x_origin, y_origin, radius, angle_start, angle_end);
+    } else {
+        ctx.arc(x_origin, y_origin, radius, angle_end, angle_start);
+    }
+    ctx.strokeStyle = 'purple';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+
+
+    let arrow_angle = angle_end + Math.PI/2;
+    let arrow_offset = 0.02;
+    if (num_degrees < 0) {
+        arrow_offset = -arrow_offset;
+        arrow_angle = angle_end - Math.PI/2;
+    }
+
+    drawArrowHead(ctx, x_origin + radius * Math.cos(angle_end+arrow_offset), y_origin + radius * Math.sin(angle_end+arrow_offset), 10, arrow_angle, 'purple');
+    
+    
+
+
+
+}
+
+function drawTestChargeForces(ctx, charges, computeField, field, dipoleMode) {
     charges.forEach(charge => {
         if(charge.isTestCharge) {
             let force;
-            if (computeField === compute_field_electrostatic_direct_to_buffer) {
-                force = compute_one_force_electrostatic(field, charge.x, charge.y, charge.charge);
-            }
-            else if (computeField === compute_field_magnetostatic_direct_to_buffer) {
-                force = compute_one_force_magnetostatic(field, charge.x, charge.y, charge.charge);
-            } else {
-                force = {u: 0, v: 0};
+            let fieldComputationFunction;
+            switch(computeField) {
+                case compute_field_electrostatic_direct_to_buffer:
+                    fieldComputationFunction = compute_one_force_electrostatic;
+                    break;
+                case compute_field_magnetostatic_direct_to_buffer:
+                    fieldComputationFunction = compute_one_force_magnetostatic;
+                    break;
+                default:
+                    fieldComputationFunction = () => {return {u: 0, v: 0}};
             }
 
-            drawForce(ctx, charge, force);
+            force = fieldComputationFunction(field, charge.x, charge.y, charge.charge);
+            let x = charge.x;
+            let y = charge.y;
+
+            if(dipoleMode && charge.dipoleWith !== undefined) {
+                if (charge.dipoleWith > charge.id) {
+                    const otherCharge = charges.find(c => c.id === charge.dipoleWith);
+                    x = (x + otherCharge.x) / 2;
+                    y = (y + otherCharge.y) / 2;
+                    const otherForce = fieldComputationFunction(field, otherCharge.x, otherCharge.y, otherCharge.charge);
+                    let torque_around_com = force.u * (otherCharge.y - y) - force.v * (otherCharge.x - x);
+                    torque_around_com += otherForce.u * (charge.y - y) - otherForce.v * (charge.x - x);
+
+                    const distanceBetweenCharges = Math.sqrt((otherCharge.x - charge.x)**2 + (otherCharge.y - charge.y)**2);
+                    torque_around_com *= 50./distanceBetweenCharges; // so that length of torque line, not angle, represents torque
+
+                    if (torque_around_com > 160) {
+                        torque_around_com = 160;
+                    } else if (torque_around_com < -160) {
+                        torque_around_com = -160;
+                    }
+        
+                    drawTorque(ctx, x, y, otherCharge.x, otherCharge.y, torque_around_com);
+                    drawTorque(ctx, x, y, charge.x, charge.y, torque_around_com);
+        
+                    force.u += otherForce.u;
+                    force.v += otherForce.v;
+                } else {
+                    return;
+                }
+            }
+
+            drawForce(ctx, x, y, force);
         }
     });
 }
@@ -187,6 +271,15 @@ function drawQuiverPlot(ctx, vectors) {
     // ctx.globalCompositeOperation = 'source-over';
 }
 
+function drawArrowHead(ctx, x, y, arrowHeadLength, angle, color) {
+    ctx.beginPath();
+    ctx.fillStyle = color;
+    ctx.moveTo(x, y);
+    ctx.lineTo(x - arrowHeadLength * Math.cos(angle - Math.PI / 6), y - arrowHeadLength * Math.sin(angle - Math.PI / 6));
+    ctx.lineTo(x - arrowHeadLength * Math.cos(angle + Math.PI / 6), y - arrowHeadLength * Math.sin(angle + Math.PI / 6));
+    ctx.closePath();
+    ctx.fill();
+}
 
 function drawArrow(ctx, x, y, u, v, color='black', linewidth=1, arrowLengthLimit=40, maxArrowHeadLength=8, centred=true) {
     let arrowLength = Math.sqrt(u * u + v * v);
@@ -217,16 +310,10 @@ function drawArrow(ctx, x, y, u, v, color='black', linewidth=1, arrowLengthLimit
     ctx.lineTo(x + u, y + v);
     ctx.stroke();
 
-    ctx.beginPath();
-    ctx.fillStyle = color;
-    ctx.moveTo(x + u, y + v);
-    ctx.lineTo(x + u - arrowHeadLength * Math.cos(angle - Math.PI / 6), y + v - arrowHeadLength * Math.sin(angle - Math.PI / 6));
-    ctx.lineTo(x + u - arrowHeadLength * Math.cos(angle + Math.PI / 6), y + v - arrowHeadLength * Math.sin(angle + Math.PI / 6));
-    ctx.closePath();
-    ctx.fill();
+    drawArrowHead(ctx, x + u, y + v, arrowHeadLength, angle, color);
 }
 
-export function draw(ctx, rect, charges, field, fieldVisType, computeField, showPotential, selectedCharge, forces) {
+export function draw(ctx, rect, charges, field, fieldVisType, computeField, showPotential, selectedCharge, forces, dipoleMode) {
     ctx.clearRect(0, 0, rect.width, rect.height);
 
 
@@ -259,8 +346,8 @@ export function draw(ctx, rect, charges, field, fieldVisType, computeField, show
         console.error('Unknown field visualization type: ' + fieldVisType);
     }
 
-    drawTestChargeForces(ctx, charges, computeField, field);
-    drawChargesOrCurrents(ctx, charges, computeField, selectedCharge, forces);
+    drawTestChargeForces(ctx, charges, computeField, field, dipoleMode);
+    drawChargesOrCurrents(ctx, charges, computeField, selectedCharge, forces, dipoleMode);
 }
 
     
