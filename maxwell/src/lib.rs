@@ -167,6 +167,10 @@ impl FieldConfiguration {
         self.elec_uniform_y = y;
     }
 
+    pub fn get_uniform_field(&self) -> Pair {
+        Pair { u: self.elec_uniform_x, v: self.elec_uniform_y }
+    }
+
     pub fn reset_fields(&mut self) {
         self.cic_grid = None;
         self.elec_x = None;
@@ -406,7 +410,7 @@ impl FieldConfiguration {
 
 #[wasm_bindgen]
 pub fn compute_potential_electrostatic_direct(field_configuration: &FieldConfiguration, x: f64, y: f64) -> f64 {
-    let mut potential: f64 = 0.0;
+    let mut potential: f64 = (x-field_configuration.geometry.x_max/2.0) * field_configuration.elec_uniform_x + (y - field_configuration.geometry.y_max/2.0) * field_configuration.elec_uniform_y;
     for charge in &field_configuration.charges {
         let dx = x - charge.x;
         let dy = y - charge.y;

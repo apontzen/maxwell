@@ -309,6 +309,162 @@ function getNextChargeToProcess(charges) {
     return highest_score_charge;
 }
 
+function getUniformFieldLaunchPoints(field) {
+    let x0 = 0.5;
+    let y0 = 0;
+    let step_y = 0.2;
+    let step_x = 0.0;
+
+    
+    
+}
+
+const step_size = 1.0;
+
+function launchStreamlineFromPoint(stream_x, stream_y, step, field, charges, ctx, rect, charge) {
+
+    let length_covered = 0;
+    
+    
+
+    const x_steps = [stream_x];
+    const y_steps = [stream_y];
+
+    let n_steps = 0;
+
+    let u_last = 0;
+    let v_last = 0;
+
+    let buffer = new Float64Array(2);
+
+    while((getChargeFromPoint(charges, stream_x, stream_y, step_size*2.0, false, charge) === null)
+        && (stream_x>-rect.width && stream_y>-rect.height && stream_x<2*rect.width && stream_y<2*rect.height)
+        && length_covered<5000.0) {
+        n_steps++;
+
+        compute_field_electrostatic_direct_to_buffer(field, stream_x, stream_y, buffer);
+        let u = buffer[0];
+        let v = buffer[1];
+        let norm = Math.sqrt(u * u + v * v);
+
+        if (norm<1e-8) {
+            // to prevent numerical instability in low field regions, keep moving
+            // in the same direction
+            u = u_last;
+            v = v_last;
+            norm = Math.sqrt(u * u + v * v);
+        }
+        
+        stream_x += step * u / norm;
+        stream_y += step * v / norm;
+
+        x_steps.push(stream_x);
+        y_steps.push(stream_y);
+
+        // corrector step
+        compute_field_electrostatic_direct_to_buffer(field, stream_x, stream_y, buffer);
+        const u2 = buffer[0];
+        const v2 = buffer[1];
+        const norm2 = Math.sqrt(u2 * u2 + v2 * v2);
+
+        if(norm2>1e-4) {
+            stream_x += step * (u2 / norm2 - u / norm)/2;
+            stream_y += step * (v2 / norm2 - v / norm)/2;
+        }
+
+        length_covered += Math.abs(step);
+        
+        u_last = u2;
+        v_last = v2;
+    }
+
+    
+
+
+    let landed_charge = getChargeFromPoint(charges, stream_x, stream_y, step_size*2.0, false, charge);
+
+
+    if (landed_charge !== null) {
+        // the arrival at another charge needs to be registered so that we don't over-launch
+        // field lines from that charge
+        const angle = Math.atan2(-step*v_last, -step*u_last);
+        debug_log("landed", landed_charge.id,"angle",angle);
+        const arrived_at = landed_charge.departures;
+        if(arrived_at.next_departure_index==arrived_at.num_departures) {
+            // Argh! We made a mistake. We've arrived at a charge that has no more field lines to launch.
+            // We need to backtrack and try again.
+            return landed_charge;
+        } else {
+            arrived_at.register_arrival(angle, charge, landed_charge);
+        }
+    } else {
+        debug_log("left the arena");
+    }
+
+    ctx.strokeStyle = 'black';
+    ctx.lineWidth = 1.0;
+    
+    let i_start = -1;
+    for(let i=0; i<x_steps.length; i++) {
+        if(x_steps[i]>-step_size && y_steps[i]>-step_size && x_steps[i]<rect.width+step_size && y_steps[i]<rect.height+step_size) {
+            if(i_start == -1) {
+                i_start = i;
+                ctx.beginPath();
+                ctx.moveTo(x_steps[i], y_steps[i]);
+            } else {
+                ctx.lineTo(x_steps[i], y_steps[i]);
+            }
+        } else if (i_start>=0) {
+            // we have just exited the screen, so draw an arrow in the middle of the segment just completed
+            ctx.stroke();
+            drawArrowOnFieldline(ctx, field, x_steps, y_steps, i_start, i);
+            i_start = -1 
+        }
+    }
+
+    if(i_start>=0) {
+        ctx.stroke();
+        drawArrowOnFieldline(ctx, field, x_steps, y_steps, i_start, x_steps.length-1);
+    }
+    return null;
+}
+
+function processDepartureFromCharge(charge, x, y, field, charges, ctx, rect) {
+    const departures = charge.departures;
+        
+    debug_log("PROCESS CHARGE:",charge);
+
+    let num_failed_launches = 0;
+    const max_failed_launches = 20;
+
+    while(true) {
+        
+        const stream_angle = departures.get_new_departure();
+        if (stream_angle === null) break;
+
+        debug_log("Departure number", departures.next_departure_index, "of", departures.num_departures, "angle:", stream_angle);
+
+        let stream_x = x + chargeSize * Math.cos(stream_angle);
+        let stream_y = y + chargeSize * Math.sin(stream_angle);
+        
+        const step = charge.charge>0?step_size:-step_size;
+        
+        const unhandled_landing = launchStreamlineFromPoint(stream_x, stream_y, step, field, charges, ctx, rect, charge);
+
+        if (unhandled_landing !== null) {
+            num_failed_launches++;
+            if(num_failed_launches>max_failed_launches) {
+                debug_log("Too many failed streamline launches. Will display the wrong number of fieldlines from at least one charge.");
+            } else {
+                debug_log("Failed streamline launch. Backtracking.");
+                departures.next_departure_index--;
+                departures.register_arrival(stream_angle, unhandled_landing, charge);
+                departures.num_departures++;
+                break;
+            }
+        }           
+    }
+}
 
 export function drawElectrostaticFieldLines(charges, field, ctx, rect, chargeSize) {
 
@@ -321,150 +477,37 @@ export function drawElectrostaticFieldLines(charges, field, ctx, rect, chargeSiz
     // However, if a field line arrives at a charge, processing that charge becomes more urgent, so 1000 is 
     // added to the score of that charge. This is to try and distribute field lines evenly around that charge
     // rather than risk launching more fieldlines at it and getting very uneven coverage.
+    
+    let uniformField = field.get_uniform_field();
+    let uniformFieldX = uniformField.u;
+    let uniformFieldY = uniformField.v;
+    
+    if(uniformFieldY !=0) {
+        console.log("uniform field in y direction not properly supported");
+    }
+
+
+    if(uniformFieldX !=0) {
+        let y_step = rect.height/Math.abs(uniformFieldX)/5;
+        let x = 0;
+        let y = 0;
+        let streamline_step = step_size * Math.sign(uniformFieldX);
+
+        let uniformFieldEffectiveCharge = {x, y, charge: 1.0, id: -1};
+
+        while(y<rect.height) {
+            x = rect.width - x; // alternate between left and right
+            streamline_step = -streamline_step;
+            launchStreamlineFromPoint(x, y, streamline_step, field, charges, ctx, rect, uniformFieldEffectiveCharge);
+            y+=y_step;
+        }
+
+    }
 
     let charge;
 
     while(charge = getNextChargeToProcess(charges)) {
-    
-        const x = charge.x;
-        const y = charge.y;
-        const departures = charge.departures;
-        
-        debug_log("PROCESS CHARGE:",charge);
-
-        let num_failed_launches = 0;
-        const max_failed_launches = 20;
-
-        while(true) {
-            
-            const stream_angle = departures.get_new_departure();
-            if (stream_angle === null) break;
-
-            debug_log("Departure number", departures.next_departure_index, "of", departures.num_departures, "angle:", stream_angle);
-
-            let stream_x = x + chargeSize * Math.cos(stream_angle);
-            let stream_y = y + chargeSize * Math.sin(stream_angle);
-            let length_covered = 0;
-
-            
-            
-
-            
-            const step_size = 1.0;
-            const step = charge.charge>0?step_size:-step_size;
-
-            const x_steps = [stream_x];
-            const y_steps = [stream_y];
-
-            let n_steps = 0;
-
-            let u_last = 0;
-            let v_last = 0;
-
-            let buffer = new Float64Array(2);
-
-            while((getChargeFromPoint(charges, stream_x, stream_y, step_size*2.0, false, charge) === null)
-                && (stream_x>-rect.width && stream_y>-rect.height && stream_x<2*rect.width && stream_y<2*rect.height)
-                && length_covered<5000.0) {
-                n_steps++;
-
-                compute_field_electrostatic_direct_to_buffer(field, stream_x, stream_y, buffer);
-                let u = buffer[0];
-                let v = buffer[1];
-                let norm = Math.sqrt(u * u + v * v);
-
-                if (norm<1e-8) {
-                    // to prevent numerical instability in low field regions, keep moving
-                    // in the same direction
-                    u = u_last;
-                    v = v_last;
-                    norm = Math.sqrt(u * u + v * v);
-                }
-                
-                stream_x += step * u / norm;
-                stream_y += step * v / norm;
-
-                x_steps.push(stream_x);
-                y_steps.push(stream_y);
-
-                // corrector step
-                compute_field_electrostatic_direct_to_buffer(field, stream_x, stream_y, buffer);
-                const u2 = buffer[0];
-                const v2 = buffer[1];
-                const norm2 = Math.sqrt(u2 * u2 + v2 * v2);
-
-                if(norm2>1e-4) {
-                    stream_x += step * (u2 / norm2 - u / norm)/2;
-                    stream_y += step * (v2 / norm2 - v / norm)/2;
-                }
-
-                length_covered += Math.abs(step);
-                
-                u_last = u2;
-                v_last = v2;
-            }
-
-            
-
-
-            let landed_charge = getChargeFromPoint(charges, stream_x, stream_y, step_size*2.0, false, charge);
-
-
-            if (landed_charge !== null) {
-                // the arrival at another charge needs to be registered so that we don't over-launch
-                // field lines from that charge
-                const angle = Math.atan2(-step*v_last, -step*u_last);
-                debug_log("landed", landed_charge.id,"angle",angle);
-                const arrived_at = landed_charge.departures;
-                if(arrived_at.next_departure_index==arrived_at.num_departures) {
-                    // Argh! We made a mistake. We've arrived at a charge that has no more field lines to launch.
-                    // We need to backtrack and try again.
-                    num_failed_launches++;
-                    if(num_failed_launches>max_failed_launches) {
-                        debug_log("Too many failed streamline launches. Will display the wrong number of fieldlines from at least one charge.");
-                    } else {
-                        debug_log("Failed streamline launch. Backtracking.");
-                        departures.next_departure_index--;
-                        departures.register_arrival(stream_angle, landed_charge, charge);
-                        departures.num_departures++;
-                        continue;
-                    }
-
-                } else {
-                    arrived_at.register_arrival(angle, charge, landed_charge);
-                }
-            } else {
-                debug_log("left the arena");
-            }
-
-            ctx.strokeStyle = 'black';
-            ctx.lineWidth = 1.0;
-            
-            let i_start = -1;
-            for(let i=0; i<x_steps.length; i++) {
-                if(x_steps[i]>-step_size && y_steps[i]>-step_size && x_steps[i]<rect.width+step_size && y_steps[i]<rect.height+step_size) {
-                    if(i_start == -1) {
-                        i_start = i;
-                        ctx.beginPath();
-                        ctx.moveTo(x_steps[i], y_steps[i]);
-                    } else {
-                        ctx.lineTo(x_steps[i], y_steps[i]);
-                    }
-                } else if (i_start>=0) {
-                    // we have just exited the screen, so draw an arrow in the middle of the segment just completed
-                    ctx.stroke();
-                    drawArrowOnFieldline(ctx, field, x_steps, y_steps, i_start, i);
-                    i_start = -1 
-                }
-            }
-
-            if(i_start>=0) {
-                ctx.stroke();
-                drawArrowOnFieldline(ctx, field, x_steps, y_steps, i_start, x_steps.length-1);
-            }
-
-                        
-        }
+        processDepartureFromCharge(charge, charge.x, charge.y, field, charges, ctx, rect);
 
     }       
     clearFieldlineDrawingInfo(charges); 
