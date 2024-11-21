@@ -45,6 +45,7 @@ export async function main(params) {
 
     let charges = [];
     let draggingCharge = null;
+    let draggingDipoleCom = false;
     let draggingOffsetX = 0;
     let draggingOffsetY = 0;
     
@@ -224,7 +225,6 @@ export async function main(params) {
     function updateSolverType(is_user_update = false) {
         cic_resolution = Math.min(cic_max_resolution, Math.max(1, Math.floor(rect.width / cic_target_logical_pixel_per_cell)));
 
-        console.debug('cic_resolution = ', cic_resolution);
         field = new FieldConfiguration(rect.width, rect.height, cic_resolution, cic_resolution);
         
         dynamic = solver === 'dynamic';
@@ -610,12 +610,19 @@ export async function main(params) {
         if (event.touches) {
             allowRadius = event.touches[0].radiusX;
         } 
-        return getChargeFromPoint(charges, offsetX, offsetY, allowRadius);
+        return getChargeFromPoint(charges, offsetX, offsetY, allowRadius, true, null, dipoleMode);
     }
 
     function mouseOrTouchDown(event) {
         deselectCharge();
         draggingCharge = getChargeFromEvent(event);
+        if (Array.isArray(draggingCharge)) {
+            draggingDipoleCom = true;
+            draggingCharge = draggingCharge[0];
+        } else {
+            draggingDipoleCom = false;
+        }
+        
         if (draggingCharge) {
             event.preventDefault();
             const { offsetX, offsetY } = coordinatesFromMouseOrTouch(event);
@@ -654,11 +661,9 @@ export async function main(params) {
             draggingCharge.x = offsetX - draggingOffsetX;
             draggingCharge.y = offsetY - draggingOffsetY;
 
-            let fix_com = true;
-
 
             if(otherCharge !== undefined) {
-                if(fix_com) {
+                if(!draggingDipoleCom) {
                     let newDeltaX = draggingCharge.x - comX;
                     let newDeltaY = draggingCharge.y - comY;
 

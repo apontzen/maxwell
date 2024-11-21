@@ -8,7 +8,7 @@ import { compute_field_electrostatic_direct_to_buffer, compute_field_magnetostat
 export const chargeSize = 10;
 const forceScaling = 0.1;
 
-export function getChargeFromPoint(charges, x, y, allowRadius, addChargeSize=true, excludeCharge=null) {
+export function getChargeFromPoint(charges, x, y, allowRadius, addChargeSize=true, excludeCharge=null, dipoleMode=false) {
     if(addChargeSize) {
         if (allowRadius == null) 
             allowRadius = chargeSize;
@@ -23,6 +23,26 @@ export function getChargeFromPoint(charges, x, y, allowRadius, addChargeSize=tru
         const dy = y - charge.y;
         if (Math.sqrt(dx * dx + dy * dy) < allowRadius && charge !== excludeCharge) {
             return charge;
+        }
+    }
+
+    if (dipoleMode) {
+        for (let i = charges.length - 1; i >= 0; i--) {
+            const charge = charges[i];
+            if (charge.dipoleWith !== undefined && charge.dipoleWith > charge.id) {
+                const otherCharge = charges.find(c => c.id === charge.dipoleWith);
+                // find the closest point to (x,y) on the line between the two charges
+                const dx = otherCharge.x - charge.x;
+                const dy = otherCharge.y - charge.y;
+                const t = ((x - charge.x) * dx + (y - charge.y) * dy) / (dx * dx + dy * dy);
+                const closestX = charge.x + t * dx;
+                const closestY = charge.y + t * dy;
+                const distSquared = (x - closestX) ** 2 + (y - closestY) ** 2;
+                if (t >= 0 && t <= 1 && distSquared < allowRadius**2) {
+                    return [charge, otherCharge];
+                }
+
+            }
         }
     }
     return null;
