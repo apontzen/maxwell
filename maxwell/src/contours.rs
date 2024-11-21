@@ -161,6 +161,11 @@ fn find_crossing_point(description: &ContouringCollection, level: f64, x0: f64, 
     (x,y)
 }
 
+fn squared_distance_to_closest_charge(field_configuration: &FieldConfiguration, x: f64, y: f64) -> f64 {
+    let closest_charge = field_configuration.closest_charge(x,y).unwrap(); // this definitely exists
+    (x-closest_charge.x).powi(2) + (y-closest_charge.y).powi(2)
+}
+
 fn generate_contours_at_levels(description: &ContouringCollection, levels: Vec<f64>) -> Vec<Vec<(f64, f64)>> {
     const MAX_CONTOURS: usize = 50;
     const NO_CHANGE: f64 = f64::INFINITY;
@@ -214,15 +219,11 @@ fn generate_contours_at_levels(description: &ContouringCollection, levels: Vec<f
         // Now follow the contour from this cell
         let (mut x, mut y) = field_configuration.geometry.cell_to_centroid(i, j);
 
-        let closest_charge = field_configuration.closest_charge(x,y).unwrap(); // this definitely exists
-        
-        let distance_to_closest = ((x-closest_charge.x).powi(2) + (y-closest_charge.y).powi(2)).sqrt();
-
-        
-        // console::log_1(&format!("Distance to closest charge: {}", distance_to_closest).into());
-        if distance_to_closest < 10. {
+        if squared_distance_to_closest_charge(&field_configuration, x, y) < 100. {
             continue;
         }
+
+
         
         (x, y) = find_crossing_point(&description, level, x, y);
 
@@ -230,8 +231,15 @@ fn generate_contours_at_levels(description: &ContouringCollection, levels: Vec<f
         
         let contour = generate_potential_contours(&description, x, y, level, false);
 
+        let mut max_squared_distance = 0.0;
+
         // unflag cells that have been visited by this contour
         contour.iter().for_each(|(x, y)| {
+            let squared_distance = squared_distance_to_closest_charge(&field_configuration, *x, *y);
+            if squared_distance > max_squared_distance {
+                max_squared_distance = squared_distance;
+            }
+
             field_configuration.geometry.position_to_surrounding_cells(*x, *y).iter().for_each(
                 |(it, jt)| { 
                     if crossing_level[[*it,*jt]]==level { 
@@ -242,8 +250,10 @@ fn generate_contours_at_levels(description: &ContouringCollection, levels: Vec<f
         });
 
 
-        contours.push(contour);
-
+        if max_squared_distance > 150.0 {
+            // only add the contour if it's not too close to a charge
+            contours.push(contour);
+        }
 
     }
     contours 

@@ -247,12 +247,25 @@ export function draw(ctx, rect, charges, field, fieldVisType, computeField, show
     } else if (fieldVisType === 'fieldline' && computeField === compute_field_magnetostatic_direct_to_buffer) {
         // Here we take cheeky advantage of the fact that the magnetostatic field lines are equivalent to
         // equipotential lines if we were solving an electrostatic problem. 
+        //
+        // i.e. the magnetic field strength is like zhat cross grad phi, with phi being the equivalent electrostatic
+        // potential. Equipotential lines in phi are then field lines in B.
+        // 
+        // There is no obvious choice of fieldline values, unfortunately. 
+        //
+        // Experimentation to get the right qualitative picture in a variety of cases suggests contour spacing being
+        // linear at high B values and then logarithmic at low B values is a good compromise.
         const rangeValues = [];
         for (let i = 1.4; i <= 4.0; i += 0.4) {
             rangeValues.push(10**i);
             rangeValues.push(-(10**i));
         }
+        //for (let i = 10**4; i<=10**6; i+=10**4 * (10**0.4 -1)) {
+        //   rangeValues.push(i);
+        //    rangeValues.push(-i);
+        //}
         rangeValues.push(0.0);
+        
         drawPotentialContours(field, rangeValues, ctx, 'black', true);
 
     } else {
