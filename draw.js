@@ -106,7 +106,7 @@ function drawTorque(ctx, x_origin, y_origin, x_start, y_start, num_degrees) {
 
 
     let arrow_angle = angle_end + Math.PI/2;
-    let arrow_offset = 0.02;
+    let arrow_offset = 2.0/radius;
     if (num_degrees < 0) {
         arrow_offset = -arrow_offset;
         arrow_angle = angle_end - Math.PI/2;
@@ -119,6 +119,21 @@ function drawTorque(ctx, x_origin, y_origin, x_start, y_start, num_degrees) {
 
 
 }
+
+function logScale(x, minval, maxval) {
+    let abs_x = Math.abs(x);
+    let sign_x = Math.sign(x);
+    if (abs_x < minval) {
+        return x;
+    }
+    let log_x = Math.log(abs_x);
+    let log_minval = Math.log(minval);
+    let log_maxval = Math.log(maxval);
+    let log_range = log_maxval - log_minval;
+    let log_x_scaled = (log_x - log_minval) / log_range;
+    return sign_x * maxval * log_x_scaled;
+}
+
 
 function drawTestChargeForces(ctx, charges, computeField, field, dipoleMode) {
     charges.forEach(charge => {
@@ -151,7 +166,9 @@ function drawTestChargeForces(ctx, charges, computeField, field, dipoleMode) {
 
                     const distanceBetweenCharges = Math.sqrt((otherCharge.x - charge.x)**2 + (otherCharge.y - charge.y)**2);
                     torque_around_com *= 50./distanceBetweenCharges; // so that length of torque line, not angle, represents torque
-
+                    
+                    torque_around_com = logScale(torque_around_com/10, 0.1, 160);
+                    
                     if (torque_around_com > 160) {
                         torque_around_com = 160;
                     } else if (torque_around_com < -160) {
@@ -174,20 +191,18 @@ function drawTestChargeForces(ctx, charges, computeField, field, dipoleMode) {
 }
 
 function drawCharges(ctx, charges, selectedCharge) {
-    charges.forEach(charge => {
-        if(charge.isTestCharge) {
-            ctx.globalAlpha = 0.5;
-        }
-        
+    charges.forEach(charge => {        
         ctx.beginPath();
         ctx.arc(charge.x, charge.y, chargeSize, 0, 2 * Math.PI, false);
-        ctx.fillStyle = charge.charge > 0 ? 'red' : 'blue';
+        if(charge.isTestCharge) {
+            ctx.fillStyle = charge.charge >0 ? 'lightcoral' : 'lightblue';
+        } else {
+            ctx.fillStyle = charge.charge > 0 ? 'red' : 'blue';
+        }
         ctx.fill();
         changeLineStyleIfSelected(ctx, charge, selectedCharge);
         ctx.stroke();
-        if(charge.isTestCharge) {
-            ctx.globalAlpha = 1;
-        }
+
     });
 }
 
@@ -330,7 +345,7 @@ function drawArrow(ctx, x, y, u, v, color='black', linewidth=1, arrowLengthLimit
     ctx.lineTo(x + u, y + v);
     ctx.stroke();
 
-    drawArrowHead(ctx, x + u, y + v, arrowHeadLength, angle, color);
+    drawArrowHead(ctx, x + u + 2*u/arrowLength, y + v + 2*v/arrowLength, arrowHeadLength, angle, color);
 }
 
 export function draw(ctx, rect, charges, field, fieldVisType, computeField, showPotential, selectedCharge, forces, dipoleMode) {
