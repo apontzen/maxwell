@@ -805,6 +805,8 @@ export function embed() {
             let perChargeCheckbox = null;
             let forcesControlsDiv = null;
             let forcesCheckbox = null;
+            let dipoleControlsDiv = null;
+            let dipoleCheckbox = null;
 
             if(meme.getAttribute('fieldlines-checkbox')) {
                 ({div: fieldlinesControlsDiv, checkbox: fieldlinesCheckbox} = addCheckbox('fieldlines-controls', 'Show field lines', meme));
@@ -818,6 +820,10 @@ export function embed() {
                 ({div: forcesControlsDiv, checkbox: forcesCheckbox} = addCheckbox('forces-controls', 'Show forces', meme));
             }
 
+            if(meme.getAttribute('dipole-checkbox')) {
+                ({div: dipoleControlsDiv, checkbox: dipoleCheckbox} = addCheckbox('dipole-controls', 'Dipole mode', meme));
+            }
+
 
 
             const canvas = meme.appendChild(document.createElement('canvas'));
@@ -827,7 +833,8 @@ export function embed() {
                 canvas, addPositiveChargeButton: null, clearChargesButton: null, solverDropdown: null, potentialControlsDiv: null,
                 potentialCheckbox: null, copyJsonButton: null, pasteJsonButton: null, chargeOrCurrentSpans: null, chargePropertiesDiv: null,
                 startingState: startingState, allowEditChargeStrength: false, allowAddDeleteCharge: false,
-                fieldlinesControlsDiv, fieldlinesCheckbox, perChargeControlDiv, perChargeCheckbox, forcesCheckbox, forcesControlsDiv
+                fieldlinesControlsDiv, fieldlinesCheckbox, perChargeControlDiv, perChargeCheckbox, forcesCheckbox, forcesControlsDiv,
+                dipoleControlsDiv, dipoleCheckbox
             }
             main(params);
         });

@@ -167,7 +167,7 @@ function drawTestChargeForces(ctx, charges, computeField, field, dipoleMode) {
                     const distanceBetweenCharges = Math.sqrt((otherCharge.x - charge.x)**2 + (otherCharge.y - charge.y)**2);
                     torque_around_com *= 50./distanceBetweenCharges; // so that length of torque line, not angle, represents torque
                     
-                    torque_around_com = logScale(torque_around_com/10, 0.1, 160);
+                    // torque_around_com = logScale(torque_around_com/10, 0.1, 160);
                     
                     if (torque_around_com > 160) {
                         torque_around_com = 160;
