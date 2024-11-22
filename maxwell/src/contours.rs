@@ -213,10 +213,8 @@ fn generate_contours_at_levels(description: &ContouringCollection, levels: Vec<f
 
         // Now follow the contour from this cell
         let (mut x, mut y) = field_configuration.geometry.cell_to_centroid(i, j);
-
-        let closest_charge = field_configuration.closest_charge(x,y).unwrap(); // this definitely exists
         
-        let distance_to_closest = ((x-closest_charge.x).powi(2) + (y-closest_charge.y).powi(2)).sqrt();
+        let distance_to_closest = field_configuration.distance_to_closest_charge(x,y);
 
         
         // console::log_1(&format!("Distance to closest charge: {}", distance_to_closest).into());
@@ -278,6 +276,23 @@ fn line_crosses_symmetry(field_configuration: &FieldConfiguration, x0: f64, y0: 
             None
         }
     };
+
+    if field_configuration.charges.len() ==0 {
+        let xcrit = field_configuration.geometry.x_max/2.0;
+        let ycrit = field_configuration.geometry.y_max/2.0;
+        // if the line crosses either x=xcrit or y=ycrit, then return the crossing point
+        if (x0-xcrit).signum() != (x1-xcrit).signum() {
+            let t = (xcrit-x0)/(x1-x0);
+            let y = y0 + t * (y1-y0);
+            return Some(Pair {u: xcrit, v: y});
+        } else if (y0-ycrit).signum() != (y1-ycrit).signum() {
+            let t = (ycrit-y0)/(y1-y0);
+            let x = x0 + t * (x1-x0);
+            return Some(Pair {u: x, v: ycrit});
+        } else {
+            return None
+        }
+    }
 
     if field_configuration.charges.len() == 1 {
         // pretend there is another charge displaced to the right of the one charge

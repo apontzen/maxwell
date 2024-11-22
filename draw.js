@@ -2,11 +2,12 @@ import { drawElectrostaticFieldLines, drawPotentialContours } from './fieldline.
 import { compute_field_electrostatic_direct_to_buffer, compute_field_magnetostatic_direct_to_buffer, 
     compute_electric_field_dynamic_to_buffer, compute_field_electrostatic_per_charge_direct_to_buffer,
     compute_field_magnetostatic_per_charge_direct_to_buffer, 
-    compute_one_force_electrostatic, compute_one_force_magnetostatic
+    compute_one_force_electrostatic, compute_one_force_magnetostatic,
+    compute_potential_electrostatic_direct
 } from './maxwell/out/maxwell.js';
 
 export const chargeSize = 10;
-const forceScaling = 0.1;
+const forceScaling = 1.0/200**3;
 
 export function getChargeFromPoint(charges, x, y, allowRadius, addChargeSize=true, excludeCharge=null, dipoleMode=false) {
     if(addChargeSize) {
@@ -68,8 +69,8 @@ function drawChargesOrCurrents(ctx, charges, computeField, selectedCharge, force
                     ctx.beginPath();
                     ctx.moveTo(charge.x, charge.y);
                     ctx.lineTo(otherCharge.x, otherCharge.y);
-                    ctx.strokeStyle = 'black';
-                    ctx.lineWidth = 1;
+                    ctx.strokeStyle = 'purple';
+                    ctx.lineWidth = 2;
                     ctx.stroke();
                 }
             }
@@ -84,7 +85,10 @@ function drawChargesOrCurrents(ctx, charges, computeField, selectedCharge, force
 }
 
 function drawForce(ctx, x, y, force) {
-    drawArrow(ctx, x, y, force.u*forceScaling*ctx.canvas.clientWidth, force.v*forceScaling*ctx.canvas.clientWidth, 'purple', 2, ctx.canvas.clientWidth/2, 20, false);
+    // We scale the forces by the canvas size cubed. This might look weird at first, but it's because natively the forces are calculated as inverse square laws
+    // in pixel space, so to make them scale down we need a canvas size squared factor; then another factor of the canvas size to scale them to the same
+    // length relative to the canvas.
+    drawArrow(ctx, x, y, force.u*forceScaling*ctx.canvas.clientWidth**3, force.v*forceScaling*ctx.canvas.clientWidth**3, 'purple', 2, ctx.canvas.clientWidth/2, 20, false);
 }
 
 function drawTorque(ctx, x_origin, y_origin, x_start, y_start, num_degrees) {
@@ -165,9 +169,8 @@ function drawTestChargeForces(ctx, charges, computeField, field, dipoleMode) {
                     torque_around_com += otherForce.u * (charge.y - y) - otherForce.v * (charge.x - x);
 
                     const distanceBetweenCharges = Math.sqrt((otherCharge.x - charge.x)**2 + (otherCharge.y - charge.y)**2);
-                    torque_around_com *= 50./distanceBetweenCharges; // so that length of torque line, not angle, represents torque
-                    
-                    // torque_around_com = logScale(torque_around_com/10, 0.1, 160);
+                    torque_around_com *= 5.0e-2*ctx.canvas.clientWidth/(distanceBetweenCharges); // so that length of torque line, not angle, represents torque
+                
                     
                     if (torque_around_com > 160) {
                         torque_around_com = 160;
@@ -175,6 +178,7 @@ function drawTestChargeForces(ctx, charges, computeField, field, dipoleMode) {
                         torque_around_com = -160;
                     }
         
+
                     drawTorque(ctx, x, y, otherCharge.x, otherCharge.y, torque_around_com);
                     drawTorque(ctx, x, y, charge.x, charge.y, torque_around_com);
         
@@ -223,7 +227,7 @@ function drawCurrents(ctx, charges, selectedCharge) {
     charges.forEach(charge => {
         ctx.save();
         if(charge.isTestCharge) { 
-            ctx.strokeStlye = 'purple';
+            ctx.strokeStyle = 'purple';
         } else {
             ctx.strokeStyle = 'black';
         }
@@ -369,12 +373,22 @@ export function draw(ctx, rect, charges, field, fieldVisType, computeField, show
     } else if (fieldVisType === 'fieldline' && computeField === compute_field_magnetostatic_direct_to_buffer) {
         // Here we take cheeky advantage of the fact that the magnetostatic field lines are equivalent to
         // equipotential lines if we were solving an electrostatic problem. 
+        let uniformField = field.get_uniform_field();
+        let uniformFieldY = uniformField.u;
+        let uniformFieldX = uniformField.v;
         const rangeValues = [];
-        for (let i = 1.4; i <= 4.0; i += 0.4) {
-            rangeValues.push(10**i);
-            rangeValues.push(-(10**i));
+        if(uniformFieldY != 0) { 
+            for(let i=rect.width/20; i<rect.width; i+=rect.width/10) {
+                rangeValues.push(compute_potential_electrostatic_direct(field, i, 0));
+            }
+        } else { 
+            
+            for (let i = 1.4; i <= 4.0; i += 0.4) {
+                rangeValues.push(10**i);
+                rangeValues.push(-(10**i));
+            }
+            rangeValues.push(0.0);
         }
-        rangeValues.push(0.0);
         drawPotentialContours(field, rangeValues, ctx, 'black', true);
 
     } else {

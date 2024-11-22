@@ -392,6 +392,17 @@ impl FieldConfiguration {
         (elec_x + self.elec_uniform_x, elec_y + self.elec_uniform_y)
     }
 
+    pub fn distance_to_closest_charge(&self, x: f64, y: f64) -> f64 {
+        if(self.charges.len() == 0) {
+            return 1.0e9;
+        } else {
+            let closest_charge = self.closest_charge(x, y).unwrap();
+            let dx = x - closest_charge.x;
+            let dy = y - closest_charge.y;
+            (dx*dx + dy*dy).sqrt()
+        }
+    }
+
     pub fn closest_charge(&self, x: f64, y: f64) -> Option<&Charge> {
         let mut closest_charge: Option<&Charge> = None;
         let mut closest_distance: f64 = 1.0e9;
