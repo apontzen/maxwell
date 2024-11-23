@@ -821,7 +821,7 @@ export function embed() {
             }
 
             if(meme.getAttribute('dipole-checkbox')) {
-                ({div: dipoleControlsDiv, checkbox: dipoleCheckbox} = addCheckbox('dipole-controls', 'Dipole mode', meme));
+                ({div: dipoleControlsDiv, checkbox: dipoleCheckbox} = addCheckbox('dipole-controls', 'Rigid dipole', meme));
             }
 
 
