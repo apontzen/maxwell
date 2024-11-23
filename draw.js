@@ -386,7 +386,7 @@ function drawArrow(ctx, x, y, u, v, color='black', linewidth=1, arrowLengthLimit
     drawArrowHead(ctx, arrowHeadX, arrowHeadY, arrowHeadLength, angle, color);
 }
 
-export function draw(ctx, rect, charges, field, fieldVisType, computeField, showPotential, selectedCharge, forces, dipoleMode) {
+export function draw(ctx, rect, charges, field, fieldVisType, computeField, showPotential, selectedCharge, forces, dipoleMode, extraDrawInfo) {
     ctx.clearRect(0, 0, rect.width, rect.height);
 
 
@@ -410,8 +410,11 @@ export function draw(ctx, rect, charges, field, fieldVisType, computeField, show
         let uniformField = field.get_uniform_field();
         let uniformFieldY = uniformField.u;
         let uniformFieldX = uniformField.v;
-        const rangeValues = [];
-        if(uniformFieldY != 0) { 
+        let rangeValues = [];
+
+        if(extraDrawInfo !== undefined && extraDrawInfo['magFieldlineLevels'] !== undefined) {
+            rangeValues = extraDrawInfo['magFieldlineLevels'];
+        } else if(uniformFieldY != 0) { 
             for(let i=rect.width/20; i<rect.width; i+=rect.width/10) {
                 rangeValues.push(compute_potential_electrostatic_direct(field, i, 0));
             }

@@ -92,6 +92,7 @@ export async function main(params) {
     let perCharge = false;
     let solver = 'electrostatic_direct';
     let dipoleMode = false;
+    let extraDrawInfo = {};
     
     let plotType = 'quiver';
 
@@ -294,7 +295,8 @@ export async function main(params) {
             // for information about the scaling of the uniform field, see jsonToState
             uniformElecX: uniformElecX * rect.height, 
             uniformElecY: uniformElecY * rect.width,
-            dipoleMode: dipoleMode
+            dipoleMode: dipoleMode,
+            extraDrawInfo: extraDrawInfo
         });
     }
 
@@ -337,6 +339,8 @@ export async function main(params) {
             perCharge = state.perCharge;
 
             dipoleMode = state.dipoleMode;
+
+            extraDrawInfo = state.extraDrawInfo;
 
             updateSolverType();
 
@@ -434,7 +438,7 @@ export async function main(params) {
 
         draw(ctx, rect, charges, field, plotType, computeField, 
             computeField === compute_field_electrostatic_direct_to_buffer && showPotential, null,
-            forces, dipoleMode);
+            forces, dipoleMode, extraDrawInfo);
 
         continueAnimation();
 

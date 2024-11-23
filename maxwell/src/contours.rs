@@ -356,12 +356,22 @@ pub fn generate_potential_contours_and_arrow_positions_at_levels(field_configura
         potential_gradient_calculator: crate::compute_field_electrostatic_direct,
         configuration: field_configuration};
 
+    let IDEAL_ARROW_SPACING: usize = 60;
+
     let contours = generate_contours_at_levels(&description, levels);
     let mut arrows: Vec<(f64, f64)> = vec![];
 
     let mut steps_until_another_arrow_allowed: usize = 0;
     
     for contour in &contours {
+        let mut arrows_at_step: Vec<usize> = vec![];
+        let mut this_step: usize=0;
+        let contour_is_closed = contour[0] == contour[contour.len()-1];
+
+        if !contour_is_closed {
+            arrows_at_step.push(0);
+        }
+
         for ((x0, y0), (x1, y1)) in contour.iter().zip(contour.iter().skip(1)) {
             if steps_until_another_arrow_allowed > 0 {
                 steps_until_another_arrow_allowed -= 1;
@@ -369,12 +379,42 @@ pub fn generate_potential_contours_and_arrow_positions_at_levels(field_configura
             }
             match line_crosses_symmetry(field_configuration, *x0, *y0, *x1, *y1) {
                 Some(Pair {u, v}) => { 
-                    steps_until_another_arrow_allowed = 10;
-                    arrows.push((u, v))
+                    steps_until_another_arrow_allowed = IDEAL_ARROW_SPACING/4;
+                    arrows.push((u, v));
+                    arrows_at_step.push(this_step);
                 },
                 None => (),
             }
+            this_step += 1;
         }
+        
+        if !contour_is_closed {
+            arrows_at_step.push(contour.len()-1);
+        } else {
+            if arrows_at_step.len() > 0 {
+                arrows_at_step.push(arrows_at_step[0]+contour.len());
+            }
+        }
+
+        for win in arrows_at_step.windows(2) {
+            let end = win[1];
+            let start = win[0];
+            let diff = end-start;
+            if diff>IDEAL_ARROW_SPACING {
+                // insert arrow in middle 
+                let mut index = start + diff/2;
+                if index >= contour.len() {
+                    index-=contour.len();
+                }
+                let (x0, y0) = contour[index];
+                arrows.push((x0, y0));
+
+            }
+        }
+
+
+    
+
     }
 
     to_value(&(contours, arrows)).unwrap()

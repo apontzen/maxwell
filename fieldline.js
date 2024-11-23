@@ -309,15 +309,6 @@ function getNextChargeToProcess(charges) {
     return highest_score_charge;
 }
 
-function getUniformFieldLaunchPoints(field) {
-    let x0 = 0.5;
-    let y0 = 0;
-    let step_y = 0.2;
-    let step_x = 0.0;
-
-    
-    
-}
 
 const step_size = 1.0;
 
