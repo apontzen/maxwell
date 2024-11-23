@@ -218,7 +218,7 @@ fn generate_contours_at_levels(description: &ContouringCollection, levels: Vec<f
 
         
         // console::log_1(&format!("Distance to closest charge: {}", distance_to_closest).into());
-        if distance_to_closest < 10. {
+        if distance_to_closest < 15. {
             continue;
         }
         

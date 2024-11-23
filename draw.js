@@ -69,7 +69,11 @@ function drawChargesOrCurrents(ctx, charges, computeField, selectedCharge, force
                     ctx.beginPath();
                     ctx.moveTo(charge.x, charge.y);
                     ctx.lineTo(otherCharge.x, otherCharge.y);
-                    ctx.strokeStyle = 'purple';
+                    if(charge.isTestCharge) {
+                        ctx.strokeStyle = 'purple';
+                    } else {
+                        ctx.strokeStyle = 'grey';
+                    }
                     ctx.lineWidth = 2;
                     ctx.stroke();
                 }
@@ -88,7 +92,7 @@ function drawForce(ctx, x, y, force) {
     // We scale the forces by the canvas size cubed. This might look weird at first, but it's because natively the forces are calculated as inverse square laws
     // in pixel space, so to make them scale down we need a canvas size squared factor; then another factor of the canvas size to scale them to the same
     // length relative to the canvas.
-    drawArrow(ctx, x, y, force.u*forceScaling*ctx.canvas.clientWidth**3, force.v*forceScaling*ctx.canvas.clientWidth**3, 'purple', 2, ctx.canvas.clientWidth/2, 20, false);
+    drawArrow(ctx, x, y, force.u*forceScaling*ctx.canvas.clientWidth**3, force.v*forceScaling*ctx.canvas.clientWidth**3, 'purple', 2, ctx.canvas.clientWidth/2, 20, false, 5);
 }
 
 function drawTorque(ctx, x_origin, y_origin, x_start, y_start, num_degrees) {
@@ -320,13 +324,16 @@ function drawArrowHead(ctx, x, y, arrowHeadLength, angle, color) {
     ctx.fill();
 }
 
-function drawArrow(ctx, x, y, u, v, color='black', linewidth=1, arrowLengthLimit=40, maxArrowHeadLength=8, centred=true) {
+function drawArrow(ctx, x, y, u, v, color='black', linewidth=1, arrowLengthLimit=40, maxArrowHeadLength=8, centred=true, minArrowHeadLength=0) {
     let arrowLength = Math.sqrt(u * u + v * v);
     const angle = Math.atan2(v, u);
 
     let arrowHeadLength = arrowLength * 0.2;
     if(arrowHeadLength > maxArrowHeadLength) {
         arrowHeadLength = maxArrowHeadLength;
+    }
+    if(arrowHeadLength < minArrowHeadLength) {
+        arrowHeadLength = minArrowHeadLength;
     }
 
 
@@ -341,6 +348,9 @@ function drawArrow(ctx, x, y, u, v, color='black', linewidth=1, arrowLengthLimit
         y-=v/2;
     }
 
+   
+
+
     ctx.lineWidth = linewidth;
     ctx.strokeStyle = color;
 
@@ -349,7 +359,31 @@ function drawArrow(ctx, x, y, u, v, color='black', linewidth=1, arrowLengthLimit
     ctx.lineTo(x + u, y + v);
     ctx.stroke();
 
-    drawArrowHead(ctx, x + u + 2*u/arrowLength, y + v + 2*v/arrowLength, arrowHeadLength, angle, color);
+    let arrowHeadX = x + u + 0.5*arrowHeadLength*u/arrowLength;
+    let arrowHeadY = y + v + 0.5*arrowHeadLength*v/arrowLength;
+
+    if (arrowHeadX<0) {
+        let t = arrowHeadX/u;
+        arrowHeadX = 0;
+        arrowHeadY = arrowHeadY - t*v;
+    }
+    if (arrowHeadY<0) {
+        let t = arrowHeadY/v;
+        arrowHeadY = 0;
+        arrowHeadX = arrowHeadX - t*u;
+    }
+    if (arrowHeadX>ctx.canvas.clientWidth) {
+        let t = (arrowHeadX-ctx.canvas.clientWidth)/u;
+        arrowHeadX = ctx.canvas.clientWidth;
+        arrowHeadY = arrowHeadY - t*v;
+    }
+    if (arrowHeadY>ctx.canvas.clientHeight) {
+        let t = (arrowHeadY-ctx.canvas.clientHeight)/v;
+        arrowHeadY = ctx.canvas.clientHeight;
+        arrowHeadX = arrowHeadX - t*u;
+    }
+
+    drawArrowHead(ctx, arrowHeadX, arrowHeadY, arrowHeadLength, angle, color);
 }
 
 export function draw(ctx, rect, charges, field, fieldVisType, computeField, showPotential, selectedCharge, forces, dipoleMode) {
