@@ -260,7 +260,7 @@ export async function main(params) {
 
         if(is_user_update) {
             postUserInteraction();
-        } else if(!dynamic) {
+        } else {
             drawVectorField();
         }
     }
