@@ -41,8 +41,8 @@ export async function main(params) {
     await initialize();
 
     const ctx = canvas.getContext('2d');
+    let rect = canvas.getBoundingClientRect();
     
-
     let charges = [];
     let draggingCharge = null;
     let draggingDipoleCom = false;
@@ -58,28 +58,6 @@ export async function main(params) {
     let cic_resolution;
 
     const dpr = window.devicePixelRatio || 1;
-
-    // make the DOM element smaller if it's exceeding the width of the device
-    canvas.style.width = '90%';
-    canvas.style.height = '90%';
-    canvas.style.maxWidth = '800px';
-    canvas.style.maxHeight = '600px';
-    
-    // Store the original CSS dimensions.
-    const rect = canvas.getBoundingClientRect();
-
-    // Give the canvas pixel dimensions of their CSS
-    // size * the device pixel ratio.
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
-
-    // Scale all drawing operations by the dpr, so you
-    // don't have to worry about the difference.
-    ctx.scale(dpr, dpr);
-
-    // Set the CSS dimensions to the original values.
-    canvas.style.width = `${rect.width}px`;
-    canvas.style.height = `${rect.height}px`;
 
     let computeField = compute_field_electrostatic_direct_to_buffer;
     let computeForces = compute_forces_electrostatic;
@@ -98,6 +76,32 @@ export async function main(params) {
 
     let animation_request_id = null;
     let last_time = null, last_interaction_time = null;
+
+
+    function updateSize() {
+
+        // make the DOM element smaller if it's exceeding the width of the device
+        canvas.style.width = '90%';
+        canvas.style.height = '90%';
+        canvas.style.maxWidth = '800px';
+        canvas.style.maxHeight = '600px';
+        
+        // Store the original CSS dimensions.
+        rect = canvas.getBoundingClientRect();
+
+        // Give the canvas pixel dimensions of their CSS
+        // size * the device pixel ratio.
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+
+        // Scale all drawing operations by the dpr, so you
+        // don't have to worry about the difference.
+        ctx.scale(dpr, dpr);
+
+        // Set the CSS dimensions to the original values.
+        canvas.style.width = `${rect.width}px`;
+        canvas.style.height = `${rect.height}px`;
+    }
 
     
     function animationIsRunning() {
@@ -274,8 +278,9 @@ export async function main(params) {
     if(dipoleCheckbox !== null)
         dipoleCheckbox.addEventListener('change', stateFromUi);
 
+    updateSize();
     updateSolverType();
-
+    drawVectorField();
     
     
 
@@ -719,6 +724,12 @@ export async function main(params) {
         return false;
     });
 
+    window.addEventListener('resize', () => {
+        const state = stateToJson();
+        updateSize();
+        jsonToState(state);
+    });
+
     if(addPositiveChargeButton!==null) 
         addPositiveChargeButton.addEventListener('click', () => {
             addCharge(canvas.width / (2*dpr), canvas.height / (2*dpr), 1);
@@ -732,7 +743,6 @@ export async function main(params) {
             drawVectorField();
         });
 
-    drawVectorField();
 }
 
 export function initialize_on_existing_dom() {
