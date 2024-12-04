@@ -324,7 +324,8 @@ function drawArrowHead(ctx, x, y, arrowHeadLength, angle, color) {
     ctx.fill();
 }
 
-function drawArrow(ctx, x, y, u, v, color='black', linewidth=1, arrowLengthLimit=40, maxArrowHeadLength=8, centred=true, minArrowHeadLength=0) {
+
+export function drawArrow(ctx, x, y, u, v, color='black', linewidth=1, arrowLengthLimit=40, maxArrowHeadLength=8, centred=true, minArrowHeadLength=0) {
     let arrowLength = Math.sqrt(u * u + v * v);
     const angle = Math.atan2(v, u);
 
@@ -389,6 +390,23 @@ function drawArrow(ctx, x, y, u, v, color='black', linewidth=1, arrowLengthLimit
 export function draw(ctx, rect, charges, field, fieldVisType, computeField, showPotential, selectedCharge, forces, dipoleMode, extraDrawInfo) {
     ctx.clearRect(0, 0, rect.width, rect.height);
 
+    const gaussianSurfacePoints = extraDrawInfo !== undefined ? extraDrawInfo['gaussianSurfacePoints'] : [];
+    
+    if (gaussianSurfacePoints.length > 0) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.strokeStyle = 'purple';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([5, 5]);
+        ctx.moveTo(gaussianSurfacePoints[0].x, gaussianSurfacePoints[0].y);
+        for (let i = 1; i < gaussianSurfacePoints.length; i++) {
+            ctx.lineTo(gaussianSurfacePoints[i].x, gaussianSurfacePoints[i].y);
+        }
+        ctx.closePath();
+        ctx.stroke();
+        ctx.restore();
+    }
+
 
     if (showPotential) {
         drawPotentialContours(field, [0], ctx, 'grey');
@@ -403,7 +421,7 @@ export function draw(ctx, rect, charges, field, fieldVisType, computeField, show
         const charges_no_test_charges = charges.filter(charge => !charge.isTestCharge);
         // The following algorithm only works when field lines start and end on charges, so perfect for the
         // electric case but not the magnetic case
-        drawElectrostaticFieldLines(charges_no_test_charges, field, ctx, rect, chargeSize);
+        drawElectrostaticFieldLines(charges_no_test_charges, field, ctx, rect, chargeSize, gaussianSurfacePoints);
     } else if (fieldVisType === 'fieldline' && computeField === compute_field_magnetostatic_direct_to_buffer) {
         // Here we take cheeky advantage of the fact that the magnetostatic field lines are equivalent to
         // equipotential lines if we were solving an electrostatic problem. 

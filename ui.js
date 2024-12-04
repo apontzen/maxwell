@@ -36,7 +36,7 @@ export async function main(params) {
         chargeOrCurrentSpans, chargePropertiesDiv, startingState, fieldlinesControlsDiv,
         fieldlinesCheckbox, allowEditChargeStrength, allowAddDeleteCharge, 
         perChargeControlDiv, perChargeCheckbox, forcesCheckbox, forcesControlsDiv,
-        dipoleControlsDiv, dipoleCheckbox} = params;
+        dipoleControlsDiv, dipoleCheckbox, allowGaussianSurface} = params;
         
     await initialize();
 
@@ -48,6 +48,9 @@ export async function main(params) {
     let draggingDipoleCom = false;
     let draggingOffsetX = 0;
     let draggingOffsetY = 0;
+
+    let drawingGaussianSurface = false;
+    let gaussianSurfacePoints = [];
     
     let uniformElecX = 0.0;
     let uniformElecY = 0.0;
@@ -345,7 +348,8 @@ export async function main(params) {
 
             dipoleMode = state.dipoleMode;
 
-            extraDrawInfo = state.extraDrawInfo;
+            if (state.extraDrawInfo !== undefined)
+                extraDrawInfo = state.extraDrawInfo;
 
             updateSolverType();
 
@@ -423,6 +427,11 @@ export async function main(params) {
 
     }
 
+    function closeLoop(points) {
+        if(points.length < 2) return [];
+        return [...points, points[0]];
+    }
+
     function drawVectorField() {
         let charges_no_test_charges = charges.filter(c => !c.isTestCharge);
         field.set_charges(charges_no_test_charges);
@@ -440,6 +449,8 @@ export async function main(params) {
         if(forcesCheckbox!==null && forcesCheckbox.checked && computeForces !== null) {
             forces = computeForces(field);
         }
+
+        extraDrawInfo['gaussianSurfacePoints'] = closeLoop(gaussianSurfacePoints);
 
         draw(ctx, rect, charges, field, plotType, computeField, 
             computeField === compute_field_electrostatic_direct_to_buffer && showPotential, null,
@@ -639,22 +650,37 @@ export async function main(params) {
             draggingOffsetY = offsetY - draggingCharge.y;
             originalChargeX = draggingCharge.x;
             originalChargeY = draggingCharge.y;
+        } else if(allowGaussianSurface) {
+            drawingGaussianSurface = true;
+            event.preventDefault();
+            const { offsetX, offsetY } = coordinatesFromMouseOrTouch(event);
+            gaussianSurfacePoints = [{x: offsetX, y: offsetY}];
         }
         return false;
     }
 
     function mouseOrTouchUp(event) {
-        if (!draggingCharge) return;
-        event.preventDefault();
-        if (!(Math.abs(originalChargeX - draggingCharge.x) > 3 || Math.abs(originalChargeY - draggingCharge.y) > 3)) {
-            selectCharge(draggingCharge);
+        if(drawingGaussianSurface) {
+            drawingGaussianSurface = false;
+            event.preventDefault();
+        } else if(draggingCharge) {
+            event.preventDefault();
+            if (!(Math.abs(originalChargeX - draggingCharge.x) > 3 || Math.abs(originalChargeY - draggingCharge.y) > 3)) {
+                selectCharge(draggingCharge);
+            }
+            draggingCharge = null;
         }
-        draggingCharge = null;
     }
 
     function mouseOrTouchMove(event) {
         const { offsetX, offsetY } = coordinatesFromMouseOrTouch(event);
-        if (draggingCharge) {
+        if(drawingGaussianSurface) {
+            const distanceFromLast = Math.sqrt((offsetX - gaussianSurfacePoints[gaussianSurfacePoints.length - 1].x) ** 2 + (offsetY - gaussianSurfacePoints[gaussianSurfacePoints.length - 1].y) ** 2);
+            if(distanceFromLast > 10) {
+                gaussianSurfacePoints.push({x: offsetX, y: offsetY});
+                postUserInteraction();
+            }
+        } else if (draggingCharge) {
             event.preventDefault();
             let otherCharge, deltaX, deltaY, comX, comY;
 
@@ -765,7 +791,7 @@ export function initialize_on_existing_dom() {
         const forcesControlsDiv = document.getElementById('forces-control');
         const dipoleControlsDiv = document.getElementById('dipole-control');
         const dipoleCheckbox = document.getElementById('dipole');
-
+        const allowGaussianSurface = false;
         const startingState = null;
 
         const allowEditChargeStrength = true;
@@ -776,7 +802,7 @@ export function initialize_on_existing_dom() {
             fieldlinesControlsDiv, fieldlinesCheckbox, 
             potentialCheckbox, copyJsonButton, pasteJsonButton, chargeOrCurrentSpans, chargePropertiesDiv,
             startingState, allowEditChargeStrength, allowAddDeleteCharge, perChargeControlDiv, perChargeCheckbox,
-            forcesCheckbox, forcesControlsDiv, dipoleControlsDiv, dipoleCheckbox
+            forcesCheckbox, forcesControlsDiv, dipoleControlsDiv, dipoleCheckbox, allowGaussianSurface
         }
         main(params);
 
@@ -848,7 +874,8 @@ export function embed() {
                 potentialCheckbox: null, copyJsonButton: null, pasteJsonButton: null, chargeOrCurrentSpans: null, chargePropertiesDiv: null,
                 startingState: startingState, allowEditChargeStrength: false, allowAddDeleteCharge: false,
                 fieldlinesControlsDiv, fieldlinesCheckbox, perChargeControlDiv, perChargeCheckbox, forcesCheckbox, forcesControlsDiv,
-                dipoleControlsDiv, dipoleCheckbox
+                dipoleControlsDiv, dipoleCheckbox,
+                allowGaussianSurface: meme.getAttribute('gaussian-surface') !== null
             }
             main(params);
         });
