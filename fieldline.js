@@ -1,6 +1,7 @@
 import { compute_field_electrostatic_direct, generate_potential_contours_at_levels, generate_potential_contours_and_arrow_positions_at_levels, compute_field_magnetostatic_direct, compute_field_electrostatic_direct_to_buffer } from './maxwell/out/maxwell.js';
 import { getChargeFromPoint, chargeSize, drawArrow } from './draw.js';
 import { getAllIntersections } from './intersection.js';
+import { windingNumber } from './winding.js';
 
 const DEBUG_MESSAGES = false; // Warning: can generate a LOT of console output!
 
@@ -439,7 +440,22 @@ function launchStreamlineFromPoint(stream_x, stream_y, step, field, charges, ctx
         const norm = Math.sqrt(u * u + v * v);
         u*=80.0/norm;
         v*=80.0/norm;
-        drawArrow(ctx, intersection.x, intersection.y, u, v, 'purple', 2);
+
+        const testHead = {x: intersection.x + u*0.01, y: intersection.y + v*0.01};
+        const testTail = {x: intersection.x - u*0.01, y: intersection.y - v*0.01};
+
+        let headWinding = windingNumber(gaussianSurfacePoints, testHead);
+        let tailWinding = windingNumber(gaussianSurfacePoints, testTail);
+
+        if (Math.abs(headWinding)>1 || Math.abs(tailWinding)>1)
+            continue;
+
+        let color;
+        if(headWinding == 0)
+            color = 'green';
+        else   
+            color = 'purple';
+        drawArrow(ctx, intersection.x, intersection.y, u, v, color, 2);
 
     }
     return null;

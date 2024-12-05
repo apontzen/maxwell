@@ -396,14 +396,20 @@ export function draw(ctx, rect, charges, field, fieldVisType, computeField, show
         ctx.save();
         ctx.beginPath();
         ctx.strokeStyle = 'purple';
-        ctx.lineWidth = 1;
+        ctx.fillStyle = 'lightgrey';
+        ctx.lineWidth = 2;
         ctx.setLineDash([5, 5]);
         ctx.moveTo(gaussianSurfacePoints[0].x, gaussianSurfacePoints[0].y);
         for (let i = 1; i < gaussianSurfacePoints.length; i++) {
             ctx.lineTo(gaussianSurfacePoints[i].x, gaussianSurfacePoints[i].y);
         }
         ctx.closePath();
+        
+
         ctx.stroke();
+        ctx.fill();
+        
+        
         ctx.restore();
     }
 
