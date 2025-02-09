@@ -1,7 +1,6 @@
-import { compute_field_electrostatic_direct, generate_potential_contours_at_levels, generate_potential_contours_and_arrow_positions_at_levels, compute_field_magnetostatic_direct, compute_field_electrostatic_direct_to_buffer } from './maxwell/out/maxwell.js';
+import { compute_field_electrostatic_direct, compute_field_magnetostatic_direct_to_buffer, generate_potential_contours_at_levels, generate_potential_contours_and_arrow_positions_at_levels, compute_field_magnetostatic_direct, compute_field_electrostatic_direct_to_buffer } from './maxwell/out/maxwell.js';
 import { getChargeFromPoint, chargeSize, drawArrow } from './draw.js';
-import { getAllIntersections } from './intersection.js';
-import { windingNumber } from './winding.js';
+import { drawGaussianSurfaceCrossings } from './gaussian_surface.js';
 
 const DEBUG_MESSAGES = false; // Warning: can generate a LOT of console output!
 
@@ -122,7 +121,6 @@ class MultiStreamDepartures {
     }
 
     get_new_departure_with_arrivals(departure_index_interleaved) {
-        let logical_angle = (departure_index_interleaved+0.5)/this.num_departures;
         if (this.departure_ranges === null) {
             this.calculate_departure_ranges();
         }
@@ -314,7 +312,7 @@ function getNextChargeToProcess(charges) {
 
 const step_size = 1.0;
 
-function launchStreamlineFromPoint(stream_x, stream_y, step, field, charges, ctx, rect, charge, gaussianSurfacePoints) {
+function launchStreamlineFromPoint(stream_x, stream_y, step, field, charges, ctx, rect, charge, gaussianSurfacePoints, relaxed) {
 
     let length_covered = 0;
     
@@ -330,8 +328,13 @@ function launchStreamlineFromPoint(stream_x, stream_y, step, field, charges, ctx
 
     let buffer = new Float64Array(2);
 
+    const x_min = relaxed?0:-rect.width;
+    const y_min = relaxed?0:-rect.height;
+    const x_max = relaxed?rect.width:2*rect.width;
+    const y_max = relaxed?rect.height:2*rect.height;
+
     while((getChargeFromPoint(charges, stream_x, stream_y, step_size*2.0, false, charge) === null)
-        && (stream_x>-rect.width && stream_y>-rect.height && stream_x<2*rect.width && stream_y<2*rect.height)
+        && (stream_x>x_min && stream_y>y_min && stream_x<x_max && stream_y<y_max)
         && length_covered<5000.0) {
         n_steps++;
 
@@ -386,6 +389,10 @@ function launchStreamlineFromPoint(stream_x, stream_y, step, field, charges, ctx
         if(arrived_at.next_departure_index==arrived_at.num_departures) {
             // Argh! We made a mistake. We've arrived at a charge that has no more field lines to launch.
             // We need to backtrack and try again.
+            if(DEBUG_MESSAGES) {
+                ctx.strokeStyle = 'lightgrey';
+                drawStreamLineFromSteps(x_steps, y_steps, rect, ctx, field);
+            }
             return landed_charge;
         } else {
             arrived_at.register_arrival(angle, charge, landed_charge);
@@ -401,29 +408,7 @@ function launchStreamlineFromPoint(stream_x, stream_y, step, field, charges, ctx
 
     ctx.lineWidth = 1.0;
     
-    let i_start = -1;
-    for(let i=0; i<x_steps.length; i++) {
-        if(x_steps[i]>-step_size && y_steps[i]>-step_size && x_steps[i]<rect.width+step_size && y_steps[i]<rect.height+step_size) {
-            if(i_start == -1) {
-                i_start = i;
-                ctx.beginPath();
-                ctx.moveTo(x_steps[i], y_steps[i]);
-            } else {
-                ctx.lineTo(x_steps[i], y_steps[i]);
-            }
-        } else if (i_start>=0) {
-            // we have just exited the screen, so draw an arrow in the middle of the segment just completed
-            ctx.stroke();
-            drawArrowOnFieldline(ctx, field, x_steps, y_steps, i_start, i);
-            i_start = -1 
-        }
-    }
-    
-
-    if(i_start>=0) {
-        ctx.stroke();
-        drawArrowOnFieldline(ctx, field, x_steps, y_steps, i_start, x_steps.length-1);
-    }
+    drawStreamLineFromSteps(x_steps, y_steps, rect, ctx, field);
 
     let intersectionPoints = []
 
@@ -431,34 +416,34 @@ function launchStreamlineFromPoint(stream_x, stream_y, step, field, charges, ctx
         intersectionPoints.push({x: x_steps[i], y: y_steps[i]});
     }
 
-    let intersections = getAllIntersections(intersectionPoints, gaussianSurfacePoints);
-
-    for (let intersection of intersections) {
-        compute_field_electrostatic_direct_to_buffer(field, intersection.x, intersection.y, buffer);
-        let u = buffer[0];
-        let v = buffer[1];
-        const norm = Math.sqrt(u * u + v * v);
-        u*=80.0/norm;
-        v*=80.0/norm;
-
-        const testHead = {x: intersection.x + u*0.01, y: intersection.y + v*0.01};
-        const testTail = {x: intersection.x - u*0.01, y: intersection.y - v*0.01};
-
-        let headWinding = windingNumber(gaussianSurfacePoints, testHead);
-        let tailWinding = windingNumber(gaussianSurfacePoints, testTail);
-
-        if (Math.abs(headWinding)>1 || Math.abs(tailWinding)>1)
-            continue;
-
-        let color;
-        if(headWinding == 0)
-            color = 'green';
-        else   
-            color = 'purple';
-        drawArrow(ctx, intersection.x, intersection.y, u, v, color, 2);
-
-    }
+    drawGaussianSurfaceCrossings(intersectionPoints, gaussianSurfacePoints, compute_field_electrostatic_direct_to_buffer, field, ctx);
     return null;
+}
+
+function drawStreamLineFromSteps(x_steps, y_steps, rect, ctx, field) {
+    let i_start = -1;
+    for (let i = 0; i < x_steps.length; i++) {
+        if (x_steps[i] > -step_size && y_steps[i] > -step_size && x_steps[i] < rect.width + step_size && y_steps[i] < rect.height + step_size) {
+            if (i_start == -1) {
+                i_start = i;
+                ctx.beginPath();
+                ctx.moveTo(x_steps[i], y_steps[i]);
+            } else {
+                ctx.lineTo(x_steps[i], y_steps[i]);
+            }
+        } else if (i_start >= 0) {
+            // we have just exited the screen, so draw an arrow in the middle of the segment just completed
+            ctx.stroke();
+            drawArrowOnFieldline(ctx, field, x_steps, y_steps, i_start, i);
+            i_start = -1;
+        }
+    }
+
+
+    if (i_start >= 0) {
+        ctx.stroke();
+        drawArrowOnFieldline(ctx, field, x_steps, y_steps, i_start, x_steps.length - 1);
+    }
 }
 
 function processDepartureFromCharge(charge, x, y, field, charges, ctx, rect, gaussianSurfacePoints) {
@@ -467,7 +452,7 @@ function processDepartureFromCharge(charge, x, y, field, charges, ctx, rect, gau
     debug_log("PROCESS CHARGE:",charge);
 
     let num_failed_launches = 0;
-    const max_failed_launches = 20;
+    const max_failed_launches = 30;
 
     while(true) {
         
@@ -481,7 +466,8 @@ function processDepartureFromCharge(charge, x, y, field, charges, ctx, rect, gau
         
         const step = charge.charge>0?step_size:-step_size;
         
-        const unhandled_landing = launchStreamlineFromPoint(stream_x, stream_y, step, field, charges, ctx, rect, charge, gaussianSurfacePoints);
+        const makeEasierToLand = true; // num_failed_launches>0;
+        const unhandled_landing = launchStreamlineFromPoint(stream_x, stream_y, step, field, charges, ctx, rect, charge, gaussianSurfacePoints, makeEasierToLand);
 
         if (unhandled_landing !== null) {
             num_failed_launches++;
@@ -492,7 +478,6 @@ function processDepartureFromCharge(charge, x, y, field, charges, ctx, rect, gau
                 departures.next_departure_index--;
                 departures.register_arrival(stream_angle, unhandled_landing, charge);
                 departures.num_departures++;
-                break;
             }
         }           
     }
@@ -569,7 +554,7 @@ function drawDirectionArrow(x_position, y_position, u, v, ctx) {
 }
 
 
-export function drawPotentialContours(charges, levels, ctx, color, show_direction = false) {
+export function drawPotentialContours(charges, levels, ctx, color, show_direction = false, gaussianSurfacePoints) {
     let contours;
     if (show_direction) {
         let arrows;
@@ -596,6 +581,15 @@ export function drawPotentialContours(charges, levels, ctx, color, show_directio
             }
         }
         ctx.stroke();
+
+        if(show_direction && gaussianSurfacePoints.length>0) {
+            let contourPoints = [];
+            for (let i = 0; i < contour.length; i++) {
+                const [x, y] = contour[i];
+                contourPoints.push({x, y});
+            }
+            drawGaussianSurfaceCrossings(contourPoints, gaussianSurfacePoints, compute_field_magnetostatic_direct_to_buffer, charges, ctx);
+        }
     }
 
 

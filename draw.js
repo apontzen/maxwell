@@ -450,7 +450,7 @@ export function draw(ctx, rect, charges, field, fieldVisType, computeField, show
             }
             rangeValues.push(0.0);
         }
-        drawPotentialContours(field, rangeValues, ctx, 'black', true);
+        drawPotentialContours(field, rangeValues, ctx, 'black', true, gaussianSurfacePoints);
 
     } else {
         console.error('Unknown field visualization type: ' + fieldVisType);
