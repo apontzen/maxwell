@@ -853,7 +853,11 @@ export function embed() {
             }
 
             if(meme.getAttribute('percharge-checkbox')) {
-                ({div: perChargeControlDiv, checkbox: perChargeCheckbox} = addCheckbox('percharge-controls', 'Per charge', meme));
+                let label = 'Per charge';
+                if (startingState && JSON.parse(startingState).solver === 'magnetostatic_direct') {
+                    label = 'Per current';
+                }
+                ({div: perChargeControlDiv, checkbox: perChargeCheckbox} = addCheckbox('percharge-controls', label, meme));
             }
 
             if(meme.getAttribute('forces-checkbox')) {
