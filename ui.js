@@ -848,13 +848,15 @@ export function embed() {
             let dipoleControlsDiv = null;
             let dipoleCheckbox = null;
 
+            const labelsReferToMagnetism = (startingState && JSON.parse(startingState).solver === 'magnetostatic_direct');
+
             if(meme.getAttribute('fieldlines-checkbox')) {
                 ({div: fieldlinesControlsDiv, checkbox: fieldlinesCheckbox} = addCheckbox('fieldlines-controls', 'Show field lines', meme));
             }
 
             if(meme.getAttribute('percharge-checkbox')) {
                 let label = 'Per charge';
-                if (startingState && JSON.parse(startingState).solver === 'magnetostatic_direct') {
+                if(labelsReferToMagnetism) {
                     label = 'Per current';
                 }
                 ({div: perChargeControlDiv, checkbox: perChargeCheckbox} = addCheckbox('percharge-controls', label, meme));
@@ -865,7 +867,11 @@ export function embed() {
             }
 
             if(meme.getAttribute('dipole-checkbox')) {
-                ({div: dipoleControlsDiv, checkbox: dipoleCheckbox} = addCheckbox('dipole-controls', 'Rigid dipole', meme));
+                let label = 'Rigid dipole';
+                if(labelsReferToMagnetism) {
+                    label = 'Rigid current loop';
+                }
+                ({div: dipoleControlsDiv, checkbox: dipoleCheckbox} = addCheckbox('dipole-controls', label, meme));
             }
 
 
