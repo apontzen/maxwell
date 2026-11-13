@@ -1,9 +1,7 @@
-import init, { compute_field_electrostatic_direct_to_buffer, compute_field_magnetostatic_direct_to_buffer, 
-    compute_field_electrostatic_per_charge_direct_to_buffer, compute_field_magnetostatic_per_charge_direct_to_buffer, 
-    compute_electric_field_dynamic_to_buffer, init_panic_hook, FieldConfiguration, 
-    compute_forces_electrostatic, compute_forces_magnetostatic} from './maxwell/out/maxwell.js';
+import init, { init_panic_hook, FieldConfiguration } from './maxwell/out/maxwell.js';
 
 import { draw, getChargeFromPoint } from './draw.js';
+import { SOLVERS, canonicalSolver, effectiveSolver, isMagnetic, makeRenderModel } from './solvers.js';
 
 const DYNAMIC_RUNTIME_SECONDS = 10;
 const DYNAMIC_RUNTIME_MS = DYNAMIC_RUNTIME_SECONDS * 1000;
@@ -62,15 +60,15 @@ export async function main(params) {
 
     const dpr = window.devicePixelRatio || 1;
 
-    let computeField = compute_field_electrostatic_direct_to_buffer;
-    let computeForces = compute_forces_electrostatic;
-
     let field = null;
 
     let dynamic = false;
 
     let showPotential = false;
     let perCharge = false;
+    // The solver chosen by the user / stored in the JSON state (canonical name). What is actually
+    // drawn uses effectiveSolver(solver, plotType): in field-line mode 3D solvers are replaced by
+    // their 2D counterparts (see solvers.js).
     let solver = 'electrostatic_direct';
     let dipoleMode = false;
     let extraDrawInfo = {};
@@ -125,10 +123,9 @@ export async function main(params) {
     }
 
     function solverSupport(solver) {
-        const allowPotential = solver === 'electrostatic_direct';
-        const allowForces = solver === 'electrostatic_direct' || solver === 'magnetostatic_direct';
-        const allowPerCharge = allowForces;
-        return {allowPotential, allowForces, allowPerCharge};
+        const info = SOLVERS[solver];
+        return {allowPotential: info.potential, allowForces: info.forces, allowPerCharge: info.perCharge,
+            allowFieldlines: info.fieldlines};
     }
 
     function uiFromState() {
@@ -166,7 +163,7 @@ export async function main(params) {
         }
 
         if(fieldlinesControlsDiv !== null) {
-            const allowFieldlines = solver === 'electrostatic_direct' || solver === 'magnetostatic_direct';
+            const {allowFieldlines} = solverSupport(solver);
 
             if(allowFieldlines) {
                 fieldlinesControlsDiv.style.display = 'inline';
@@ -178,8 +175,10 @@ export async function main(params) {
             }
         }
 
+        // The dropdown shows the model actually drawn: ticking field lines on a 3D model
+        // visibly switches it to the 2D counterpart, and unticking restores the user's choice.
         if(solverDropdown !== null)
-            solverDropdown.value = solver;
+            solverDropdown.value = effectiveSolver(solver, plotType);
 
         if(potentialCheckbox !== null)
             potentialCheckbox.checked = showPotential;
@@ -190,7 +189,7 @@ export async function main(params) {
 
         
 
-        if(solver === 'magnetostatic_direct') {
+        if(isMagnetic(solver)) {
             updateChargeOrCurrentLabel('Current');
         } else {
             updateChargeOrCurrentLabel('Charge');
@@ -198,7 +197,7 @@ export async function main(params) {
 
     }
 
-    function stateFromUi() {
+    function stateFromUi(event) {
         
         if(animation_request_id!==null)
             window.cancelAnimationFrame(animation_request_id);
@@ -206,8 +205,10 @@ export async function main(params) {
         animation_request_id = null;
         last_time = null;
 
-        if(solverDropdown !== null) 
-            solver = solverDropdown.value;
+        // Only a change of the dropdown itself changes the chosen solver: at other times the dropdown
+        // may be showing the derived 2D model.
+        if(solverDropdown !== null && event !== undefined && event.target === solverDropdown)
+            solver = canonicalSolver(solverDropdown.value);
 
         const solverSupportInfo = solverSupport(solver);
 
@@ -235,29 +236,7 @@ export async function main(params) {
 
         field = new FieldConfiguration(rect.width, rect.height, cic_resolution, cic_resolution);
         
-        dynamic = solver === 'dynamic';
-
-        computeForces = null;
-
-        if (solver === 'electrostatic_direct') {
-            if(perCharge) {
-                computeField = compute_field_electrostatic_per_charge_direct_to_buffer;
-            } else {
-                computeField = compute_field_electrostatic_direct_to_buffer;
-            }
-            computeForces = compute_forces_electrostatic;
-        } else if (solver === 'electrostatic_fourier' || solver === 'dynamic') {
-            computeField = compute_electric_field_dynamic_to_buffer;
-        } else if (solver === 'magnetostatic_direct') { 
-            if(perCharge) {
-                computeField = compute_field_magnetostatic_per_charge_direct_to_buffer;
-            } else { 
-                computeField = compute_field_magnetostatic_direct_to_buffer;
-            }
-            computeForces = compute_forces_magnetostatic;
-        } else {
-            console.error('Unknown solver type');
-        }
+        dynamic = !!SOLVERS[solver].dynamic;
 
         uiFromState(); // e.g. updates visibility of potential checkbox
 
@@ -317,9 +296,6 @@ export async function main(params) {
                 return {...charge, x: scaledX, y: scaledY};
             });
 
-            if(solverDropdown !== null)
-                solverDropdown.value = state.solver;
-
             if(potentialCheckbox !== null)
                 potentialCheckbox.checked = state.show_potential;
             
@@ -342,7 +318,7 @@ export async function main(params) {
             else
                 uniformElecY = 0.0;
 
-            solver = state.solver;
+            solver = canonicalSolver(state.solver);
 
             perCharge = state.perCharge;
 
@@ -444,17 +420,22 @@ export async function main(params) {
         }
 
 
+        const renderModel = makeRenderModel(effectiveSolver(solver, plotType), {
+            field, charges, uniformX: uniformElecX, uniformY: uniformElecY,
+            width: rect.width, height: rect.height, perCharge,
+        });
+
         let forces = null;
 
-        if(forcesCheckbox!==null && forcesCheckbox.checked && computeForces !== null) {
-            forces = computeForces(field);
+        if(forcesCheckbox!==null && forcesCheckbox.checked && renderModel.info.forces) {
+            forces = renderModel.forcesOnSources();
         }
 
         extraDrawInfo['gaussianSurfacePoints'] = closeLoop(gaussianSurfacePoints);
 
-        draw(ctx, rect, charges, field, plotType, computeField, 
-            computeField === compute_field_electrostatic_direct_to_buffer && showPotential, null,
-            forces, dipoleMode, extraDrawInfo);
+        draw(ctx, rect, charges, renderModel, {
+            plotType, showPotential, selectedCharge: null, forces, dipoleMode, extraDrawInfo,
+        });
 
         continueAnimation();
 
@@ -575,35 +556,6 @@ export async function main(params) {
         field.set_charges(charges);
         drawVectorField();
     }
-
-    function outputNumpyArray() {
-        // sample the field along the x axis, with y set equal to charges[0].y, and
-        // output to a string that can be parsed by numpy for debug purposes
-        const y = charges[0].y;
-        const x_values = [];
-        const u_values = [];
-        const v_values = [];
-        const buffer = new Float64Array(2);
-        for (let x = 0; x < rect.width; x += 10) {
-            computeField(field, x, y, buffer);
-            x_values.push(x);
-            u_values.push(buffer[0]);
-            v_values.push(buffer[1]);
-        }
-
-        const x_ar = ('x = np.array(' + JSON.stringify(x_values) + ');');
-        const u_ar = ('u = np.array(' + JSON.stringify(u_values) + ');');
-        const v_ar = ('v = np.array(' + JSON.stringify(v_values) + ')');
-
-        // set the contents of dom element id numpy-output to x_ar+u_ar+v_ar
-        
-        console.log(x_ar);
-        console.log(u_ar);
-        console.log(v_ar);
-
-        navigator.clipboard.writeText(x_ar + u_ar + v_ar);
-    }
-
 
     let originalChargeX = 0;
     let originalChargeY = 0;
@@ -848,7 +800,7 @@ export function embed() {
             let dipoleControlsDiv = null;
             let dipoleCheckbox = null;
 
-            const labelsReferToMagnetism = (startingState && JSON.parse(startingState).solver === 'magnetostatic_direct');
+            const labelsReferToMagnetism = !!startingState && isMagnetic(JSON.parse(startingState).solver);
 
             if(meme.getAttribute('fieldlines-checkbox')) {
                 ({div: fieldlinesControlsDiv, checkbox: fieldlinesCheckbox} = addCheckbox('fieldlines-controls', 'Show field lines', meme));

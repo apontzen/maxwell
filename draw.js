@@ -1,10 +1,5 @@
-import { drawElectrostaticFieldLines, drawPotentialContours } from './fieldline.js';
-import { compute_field_electrostatic_direct_to_buffer, compute_field_magnetostatic_direct_to_buffer, 
-    compute_electric_field_dynamic_to_buffer, compute_field_electrostatic_per_charge_direct_to_buffer,
-    compute_field_magnetostatic_per_charge_direct_to_buffer, 
-    compute_one_force_electrostatic, compute_one_force_magnetostatic,
-    compute_potential_electrostatic_direct
-} from './maxwell/out/maxwell.js';
+import { drawPotentialContours, drawPotentialContours2D, drawElectricFieldLines2D,
+    drawMagneticFieldLines2D } from './fieldline.js';
 
 export const chargeSize = 10;
 const forceScaling = 1.0/200**3;
@@ -49,7 +44,7 @@ export function getChargeFromPoint(charges, x, y, allowRadius, addChargeSize=tru
     return null;
 }
 
-function drawChargesOrCurrents(ctx, charges, computeField, selectedCharge, forces, dipoleMode) {
+function drawChargesOrCurrents(ctx, charges, magnetic, selectedCharge, forces, dipoleMode) {
     const width = ctx.canvas.clientWidth;
 
     const charges_no_test_charges = charges.filter(charge => !charge.isTestCharge);
@@ -81,7 +76,7 @@ function drawChargesOrCurrents(ctx, charges, computeField, selectedCharge, force
         });
     }
 
-    if (computeField === compute_field_magnetostatic_direct_to_buffer || computeField === compute_field_magnetostatic_per_charge_direct_to_buffer) {
+    if (magnetic) {
         drawCurrents(ctx, charges, selectedCharge);
     } else {
         drawCharges(ctx, charges, selectedCharge);
@@ -143,23 +138,15 @@ function logScale(x, minval, maxval) {
 }
 
 
-function drawTestChargeForces(ctx, charges, computeField, field, dipoleMode) {
+function drawTestChargeForces(ctx, charges, renderModel, dipoleMode) {
     charges.forEach(charge => {
         if(charge.isTestCharge) {
             let force;
-            let fieldComputationFunction;
-            switch(computeField) {
-                case compute_field_electrostatic_direct_to_buffer:
-                    fieldComputationFunction = compute_one_force_electrostatic;
-                    break;
-                case compute_field_magnetostatic_direct_to_buffer:
-                    fieldComputationFunction = compute_one_force_magnetostatic;
-                    break;
-                default:
-                    fieldComputationFunction = () => {return {u: 0, v: 0}};
-            }
+            // In per-charge mode no forces are shown (as before the field-model refactor)
+            const fieldComputationFunction = renderModel.perCharge ? () => ({u: 0, v: 0})
+                : (x, y, q) => renderModel.forceOn(x, y, q);
 
-            force = fieldComputationFunction(field, charge.x, charge.y, charge.charge);
+            force = fieldComputationFunction(charge.x, charge.y, charge.charge);
             let x = charge.x;
             let y = charge.y;
 
@@ -168,7 +155,7 @@ function drawTestChargeForces(ctx, charges, computeField, field, dipoleMode) {
                     const otherCharge = charges.find(c => c.id === charge.dipoleWith);
                     x = (x + otherCharge.x) / 2;
                     y = (y + otherCharge.y) / 2;
-                    const otherForce = fieldComputationFunction(field, otherCharge.x, otherCharge.y, otherCharge.charge);
+                    const otherForce = fieldComputationFunction(otherCharge.x, otherCharge.y, otherCharge.charge);
                     let torque_around_com = force.u * (otherCharge.y - y) - force.v * (otherCharge.x - x);
                     torque_around_com += otherForce.u * (charge.y - y) - otherForce.v * (charge.x - x);
 
@@ -270,14 +257,17 @@ function drawCurrents(ctx, charges, selectedCharge) {
     });
 }
 
-function generateVectors(computeField, rect, charges, field) {
+function generateVectors(renderModel, rect, charges) {
     const vectors = [];
     const step = 20;
     var buffer;
     var n_per_point;
     var color = 'black';
     
-    if(computeField === compute_field_electrostatic_per_charge_direct_to_buffer || computeField === compute_field_magnetostatic_per_charge_direct_to_buffer) {
+    const field = renderModel.field;
+    let computeField = renderModel.fieldToBuffer;
+    if(renderModel.perCharge) {
+        computeField = renderModel.fieldPerChargeToBuffer;
         buffer = new Float64Array(2*charges.length);
         n_per_point = charges.length;
     } else {
@@ -387,7 +377,14 @@ export function drawArrow(ctx, x, y, u, v, color='black', linewidth=1, arrowLeng
     drawArrowHead(ctx, arrowHeadX, arrowHeadY, arrowHeadLength, angle, color);
 }
 
-export function draw(ctx, rect, charges, field, fieldVisType, computeField, showPotential, selectedCharge, forces, dipoleMode, extraDrawInfo) {
+/**
+ * Draw the whole scene.
+ *
+ * @param renderModel  from solvers.js makeRenderModel(): the (effective) field model
+ * @param options      {plotType: 'quiver'|'fieldline', showPotential, selectedCharge, forces,
+ *                      dipoleMode, extraDrawInfo: {gaussianSurfacePoints}}
+ */
+export function draw(ctx, rect, charges, renderModel, { plotType, showPotential, selectedCharge, forces, dipoleMode, extraDrawInfo }) {
     ctx.clearRect(0, 0, rect.width, rect.height);
 
     const gaussianSurfacePoints = extraDrawInfo !== undefined ? extraDrawInfo['gaussianSurfacePoints'] : [];
@@ -414,50 +411,32 @@ export function draw(ctx, rect, charges, field, fieldVisType, computeField, show
     }
 
 
-    if (showPotential) {
-        drawPotentialContours(field, [0], ctx, 'grey');
-        drawPotentialContours(field, [250., 500., 750., 1000., 1250., 1500.,], ctx, 'blue');
-        drawPotentialContours(field, [-250., -500.,-750., -1000., -1250., -1500.], ctx, 'red');
-    }
+    const model2D = renderModel.model2D;
 
-    if (fieldVisType === 'quiver') {
-        const vectors = generateVectors(computeField, rect, charges, field);
-        drawQuiverPlot(ctx, vectors);
-    } else if (fieldVisType === 'fieldline' && computeField === compute_field_electrostatic_direct_to_buffer) {
-        const charges_no_test_charges = charges.filter(charge => !charge.isTestCharge);
-        // The following algorithm only works when field lines start and end on charges, so perfect for the
-        // electric case but not the magnetic case
-        drawElectrostaticFieldLines(charges_no_test_charges, field, ctx, rect, chargeSize, gaussianSurfacePoints);
-    } else if (fieldVisType === 'fieldline' && computeField === compute_field_magnetostatic_direct_to_buffer) {
-        // Here we take cheeky advantage of the fact that the magnetostatic field lines are equivalent to
-        // equipotential lines if we were solving an electrostatic problem. 
-        let uniformField = field.get_uniform_field();
-        let uniformFieldY = uniformField.u;
-        let uniformFieldX = uniformField.v;
-        let rangeValues = [];
-
-        if(extraDrawInfo !== undefined && extraDrawInfo['magFieldlineLevels'] !== undefined) {
-            rangeValues = extraDrawInfo['magFieldlineLevels'];
-        } else if(uniformFieldY != 0) { 
-            for(let i=rect.width/20; i<rect.width; i+=rect.width/10) {
-                rangeValues.push(compute_potential_electrostatic_direct(field, i, 0));
-            }
-        } else { 
-            
-            for (let i = 1.4; i <= 4.0; i += 0.4) {
-                rangeValues.push(10**i);
-                rangeValues.push(-(10**i));
-            }
-            rangeValues.push(0.0);
+    if (showPotential && !renderModel.isMagnetic && !renderModel.perCharge && renderModel.info.potential) {
+        if (model2D) {
+            drawPotentialContours2D(ctx, model2D, rect);
+        } else {
+            const field = renderModel.field;
+            drawPotentialContours(field, [0], ctx, 'grey');
+            drawPotentialContours(field, [250., 500., 750., 1000., 1250., 1500.,], ctx, 'blue');
+            drawPotentialContours(field, [-250., -500.,-750., -1000., -1250., -1500.], ctx, 'red');
         }
-        drawPotentialContours(field, rangeValues, ctx, 'black', true, gaussianSurfacePoints);
-
-    } else {
-        console.error('Unknown field visualization type: ' + fieldVisType);
     }
 
-    drawTestChargeForces(ctx, charges, computeField, field, dipoleMode);
-    drawChargesOrCurrents(ctx, charges, computeField, selectedCharge, forces, dipoleMode);
+    if (plotType === 'quiver') {
+        const vectors = generateVectors(renderModel, rect, charges);
+        drawQuiverPlot(ctx, vectors);
+    } else if (plotType === 'fieldline' && model2D && !model2D.isMagnetic) {
+        drawElectricFieldLines2D(ctx, model2D, rect, gaussianSurfacePoints);
+    } else if (plotType === 'fieldline' && model2D && model2D.isMagnetic) {
+        drawMagneticFieldLines2D(ctx, model2D, rect, gaussianSurfacePoints);
+    } else {
+        console.error(`Cannot draw ${plotType} for solver ${renderModel.solver}`);
+    }
+
+    drawTestChargeForces(ctx, charges, renderModel, dipoleMode);
+    drawChargesOrCurrents(ctx, charges, renderModel.isMagnetic, selectedCharge, forces, dipoleMode);
 }
 
     
