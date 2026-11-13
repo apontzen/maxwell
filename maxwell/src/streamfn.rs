@@ -24,6 +24,19 @@ use num_complex::Complex;
 use rustfft::{Fft, FftPlanner};
 use crate::geometry::Geometry;
 
+/// Regularisation length of the subtracted point charges, in cells, and the distance (in units of
+/// it) beyond which the regularisation is negligible (exp(-REG_FAR^2 / 2) ~ 1e-8)
+const REG_CELLS: f64 = 1.0;
+const REG_FAR: f64 = 6.0;
+
+/// Gauss-Legendre nodes and weights on [-1, 1]
+const GAUSS_LEGENDRE_8: [(f64, f64); 8] = [
+    (-0.9602898564975363, 0.1012285362903763), (-0.7966664774136267, 0.2223810344533745),
+    (-0.5255324099163290, 0.3137066458778873), (-0.1834346424956498, 0.3626837833783620),
+    (0.1834346424956498, 0.3626837833783620), (0.5255324099163290, 0.3137066458778873),
+    (0.7966664774136267, 0.2223810344533745), (0.9602898564975363, 0.1012285362903763),
+];
+
 /// Wrap a difference of two principal angles into (-pi, pi].
 #[inline]
 fn wrap(a: f64) -> f64 {
@@ -139,9 +152,38 @@ pub(crate) fn residuals(geometry: &Geometry, elec_x: &Array2<f64>, elec_y: &Arra
         }
     }
     let inv_two_pi = 1.0 / (2.0 * std::f64::consts::PI);
+    // Close to a charge, the point charge's flux through a segment flips between +q/2 and -q/2 as the
+    // charge crosses the segment's line, which would make psi_rest jump as a charge is dragged. So
+    // the singular part subtracted here is regularised within a few cells, where the grid's charge
+    // is smeared anyway: flux (q / 2 pi) * integral of (1 - exp(-r^2 / 2 s^2)) d theta, which is
+    // continuous in the charge's position and equal to the point charge's beyond REG_FAR * s.
+    let s_reg = REG_CELLS * dx.max(dy);
+    let far2 = (REG_FAR * s_reg).powi(2);
+    let regularised = |k: usize, x0: f64, y0: f64, x1: f64, y1: f64| -> f64 {
+        let (ex, ey) = (x1 - x0, y1 - y0);
+        let mut total = 0.0;
+        for half in 0..2 {
+            for (node, weight) in GAUSS_LEGENDRE_8.iter() {
+                let t = 0.25 * (node + 1.0) + 0.5 * half as f64;
+                let (rx, ry) = (x0 + t * ex - xs[k], y0 + t * ey - ys[k]);
+                let r2 = rx * rx + ry * ry;
+                // d theta / dt = (r x e) / r^2; regularised: (1 - exp(-r^2 / 2s^2)) / r^2 -> 1 / 2s^2
+                let f = if r2 > 1e-12 * s_reg * s_reg { -(-r2 / (2.0 * s_reg * s_reg)).exp_m1() / r2 } else { 0.5 / (s_reg * s_reg) };
+                total += 0.25 * weight * f * (rx * ey - ry * ex);
+            }
+        }
+        total
+    };
     let sing = |p0: usize, p1: usize| -> f64 {
+        let (a0, b0, a1, b1) = (p0 / m, p0 % m, p1 / m, p1 % m);
+        let (x0, y0, x1, y1) = (a0 as f64 * dx, b0 as f64 * dy, a1 as f64 * dx, b1 as f64 * dy);
+        let (xm, ym) = (0.5 * (x0 + x1), 0.5 * (y0 + y1));
         let mut s = 0.0;
-        for k in 0..nq { s += qs[k] * wrap(theta[k * m * m + p1] - theta[k * m * m + p0]); }
+        for k in 0..nq {
+            let d2 = (xm - xs[k]).powi(2) + (ym - ys[k]).powi(2);
+            let dtheta = if d2 > far2 { wrap(theta[k * m * m + p1] - theta[k * m * m + p0]) } else { regularised(k, x0, y0, x1, y1) };
+            s += qs[k] * dtheta;
+        }
         s * inv_two_pi
     };
     let mut rx = vec![0.0; m * m];

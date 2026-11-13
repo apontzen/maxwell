@@ -3,13 +3,13 @@ use num_complex::Complex;
 use crate::fourier;
 use crate::geometry::Geometry;
 
+/// The smoothing Gaussian applied to charges and currents has sigma = 2 cells, truncated at 4 sigma.
+pub const SMOOTHING_SIGMA_CELLS: f64 = 2.0;
+const SMOOTHING_HALF_WIDTH: isize = 8;
+
 pub struct Stencils {
     pub del_squared_inv: Option<Array2<Complex<f64>>>,
-    pub soften: Option<Array2<Complex<f64>>>,
     geometry: Geometry,
-    soften_norm: f64,
-    soften_sigma_x: f64,
-    soften_sigma_y: f64,
 
 }
 
@@ -18,9 +18,6 @@ pub enum StencilType {
     DelSquared,
     GradX,
     GradY,
-    GradXDelSquaredInv,
-    GradYDelSquaredInv,
-    Soften,
 }
 
 #[allow(dead_code)]
@@ -33,9 +30,8 @@ pub enum DifferenceType {
 
 impl Stencils {
     pub fn new(geometry: Geometry) -> Stencils {
-        let mut s = Stencils { del_squared_inv: None, soften: None, geometry, soften_norm: 0.0, soften_sigma_x: 0.0, soften_sigma_y: 0.0};
+        let mut s = Stencils { del_squared_inv: None, geometry };
         s.init_inv_laplacian();
-        s.init_soften();
         s
     }
 
@@ -48,14 +44,16 @@ impl Stencils {
         self.del_squared_inv = Some(del_squared_inv);
     }
 
-    fn init_soften(&mut self) {
-        self.soften_sigma_x = 2.0 * self.geometry.delta_x();
-        self.soften_sigma_y = 2.0 * self.geometry.delta_y();
-        let (mut soften, soften_norm) = self.make_soften_stencil();
-        fourier::array_fft(&mut soften);
-        fourier::array_fft_renormalise(&mut soften);
-        self.soften = Some(soften);
-        self.soften_norm = soften_norm;
+    /// The gradient (forward differences) of del^-2 rho: (d/dx, d/dy) of the periodic solution of
+    /// del^2 phi = rho with the k = 0 mode dropped. One FFT pair for both components.
+    pub fn grad_del_squared_inv(&self, rho: &Array2<f64>) -> (Array2<f64>, Array2<f64>) {
+        let mut phi = rho.clone();
+        self.apply_fourier_stencil(&mut phi, self.del_squared_inv.as_ref().unwrap());
+        let mut gx = Array2::<f64>::zeros(rho.dim());
+        let mut gy = Array2::<f64>::zeros(rho.dim());
+        self.apply_grad(&phi, &mut gx, StencilType::GradX, DifferenceType::Forward);
+        self.apply_grad(&phi, &mut gy, StencilType::GradY, DifferenceType::Forward);
+        (gx, gy)
     }
 
     fn apply_fourier_stencil(&self, array: &mut Array2<f64>, fourier_stencil: &Array2<Complex<f64>>) {
@@ -97,84 +95,33 @@ impl Stencils {
         result
     }
 
-    pub fn add_softened_point(&self, array: &mut Array2<f64>, i_cen: usize, j_cen: usize, value: f64) {
-        // While originally I used CIC assignment of charges/currents and then used a FFT convolution algorithm, since
-        // the number of charges is much less than log N^2, it's actually far more efficient to directly convolve in
-        // real space
-        let dx = self.geometry.delta_x();
-        let dy = self.geometry.delta_y();
-
-        let sigma_x = self.soften_sigma_x;
-        let sigma_y = self.soften_sigma_y;
-
-        let i_cen_signed = i_cen as isize;
-        let j_cen_signed = j_cen as isize;
-
-        let max_offset_x = (4.0*sigma_x / dx) as isize;
-        let max_offset_y = (4.0*sigma_y / dy) as isize;
-
-        for i_offset in -max_offset_x..max_offset_x+1 {
-            for j_offset in -max_offset_y..max_offset_y+1 {
-                let x = i_offset as f64*dx;
-                let y = j_offset as f64*dy;
-                let exponent = -((x * x) / (2.0 * sigma_x * sigma_x) + (y * y) / (2.0 * sigma_y * sigma_y));
-
-                let mut i = i_cen_signed + i_offset;
-                let mut j = j_cen_signed + j_offset;
-
-                if i < 0 {
-                    i += self.geometry.nx as isize;
-                } else if i >= self.geometry.nx as isize {
-                    i -= self.geometry.nx as isize;
-                }
-
-                if j < 0 {
-                    j += self.geometry.ny as isize;
-                } else if j >= self.geometry.ny as isize {
-                    j -= self.geometry.ny as isize;
-                }
-
-                array[[i as usize, j as usize]] += value * exponent.exp()/self.soften_norm;
-            }
-        }
-
+    /// 1D weights of the smoothing Gaussian centred on the (sub-cell) position `pos` along an axis
+    /// with cells of size `delta` (sigma = 2 cells), normalised to sum to exactly 1. Returns the
+    /// padded-grid index of the first weight (may be negative or beyond the grid: wrap it).
+    pub fn gaussian_weights(&self, pos: f64, delta: f64) -> (isize, Vec<f64>) {
+        let u = pos / delta + self.geometry.nboundary as f64; // in cells; cell i spans [i, i + 1]
+        let centre = (u - 0.5).floor() as isize;
+        let start = centre - SMOOTHING_HALF_WIDTH;
+        let mut w: Vec<f64> = (0..(2 * SMOOTHING_HALF_WIDTH + 2) as usize).map(|k| {
+            let d = (start + k as isize) as f64 + 0.5 - u;
+            (-d * d / (2.0 * SMOOTHING_SIGMA_CELLS * SMOOTHING_SIGMA_CELLS)).exp()
+        }).collect();
+        let total: f64 = w.iter().sum();
+        w.iter_mut().for_each(|v| *v /= total);
+        (start, w)
     }
 
-    pub fn make_soften_stencil(&self) -> (Array2<Complex<f64>>, f64) {
-        let mut result = Array2::<Complex<f64>>::zeros((self.geometry.nx, self.geometry.ny));
-        
-        let dx = self.geometry.delta_x();
-        let dy = self.geometry.delta_y();
-
-        let sigma_x = self.soften_sigma_x;
-        let sigma_y = self.soften_sigma_y;
-
-        // Instead of analytically computing the gaussian norm, we compute it numerically so that
-        // aliasing errors are taken into account
-        let mut norm: Complex<f64> = Complex::new(0.0, 0.0); 
-
-        let x_extent_including_boundary = self.geometry.x_extent_including_boundary();
-        let y_extent_including_boundary = self.geometry.y_extent_including_boundary();
-
-        for i in 0..self.geometry.nx {
-            for j in 0..self.geometry.ny {
-                let mut x = i as f64*dx;
-                let mut y = j as f64*dy;
-                if x > x_extent_including_boundary/2.0 {
-                    x = x_extent_including_boundary - x;
-                }
-                if y > y_extent_including_boundary/2.0 {
-                    y = y_extent_including_boundary - y;
-                }
-                let exponent = -((x * x) / (2.0 * sigma_x * sigma_x) + (y * y) / (2.0 * sigma_y * sigma_y));
-                result[[i, j]] = Complex::new( exponent.exp(), 0.0);
-                norm += result[[i, j]];
+    /// Add value * wx[i - sx] * wy[j - sy] (periodic wrap).
+    pub fn add_separable(&self, array: &mut Array2<f64>, sx: isize, wx: &[f64], sy: isize, wy: &[f64], value: f64) {
+        let (nx, ny) = (self.geometry.nx as isize, self.geometry.ny as isize);
+        for (a, vx) in wx.iter().enumerate() {
+            if *vx == 0.0 { continue; }
+            let i = (sx + a as isize).rem_euclid(nx) as usize;
+            for (b, vy) in wy.iter().enumerate() {
+                let j = (sy + b as isize).rem_euclid(ny) as usize;
+                array[[i, j]] += value * vx * vy;
             }
         }
-
-        result /=norm;
-        
-        (result, norm.norm())
     }
 
     pub fn apply_grad(&self, array: & Array2<f64>, result: &mut Array2<f64>, stencil_type: StencilType, difference_type: DifferenceType) {
@@ -215,26 +162,6 @@ impl Stencils {
             },
             _ => { panic!("Invalid stencil type for real-space evaluation") }
         }
-    }
-
-    pub fn apply(&self, array: &mut Array2<f64>, stencil_type: StencilType, difference_type: DifferenceType) {
-        let mut scratch = array.clone();
-        
-        match stencil_type {
-            StencilType::GradXDelSquaredInv | StencilType::GradYDelSquaredInv => {
-                self.apply_fourier_stencil(&mut scratch, self.del_squared_inv.as_ref().unwrap())
-            },
-            StencilType::Soften => {
-                self.apply_fourier_stencil(&mut scratch, self.soften.as_ref().unwrap())
-            },
-            _ => ()
-        };
-        
-        match stencil_type {
-            StencilType::GradXDelSquaredInv | StencilType::GradX => self.apply_grad(&scratch, array, StencilType::GradX, difference_type),
-            StencilType::GradYDelSquaredInv | StencilType::GradY => self.apply_grad(&scratch, array, StencilType::GradY, difference_type),
-            _ => array.clone_from(&scratch),
-        };
     }
 
 }
