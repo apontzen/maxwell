@@ -1,3 +1,11 @@
 maxwell/out/*
 maxwell/target/*
 maxwell/Cargo.lock
+
+# Test tooling
+node_modules/
+test-results/
+playwright-report/
+# Reference images are only kept for Linux (see tests/README.md)
+tests/__snapshots__/**/*-darwin.png
+tests/__snapshots__/**/*-win32.png

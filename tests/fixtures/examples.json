@@ -1,0 +1,1065 @@
+[
+  {
+    "id": "lecture01-1",
+    "source": "du_electromagnetism/lectures/lecture01.md:160",
+    "attributes": {
+      "meme": "{\"charges\":[{\"x\":0.5,\"y\":0.5,\"charge\":4,\"id\":0}],\"solver\":\"electrostatic_direct\",\"showPotential\":false,\"plotType\":\"quiver\"}"
+    },
+    "state": {
+      "charges": [
+        {
+          "x": 0.5,
+          "y": 0.5,
+          "charge": 4,
+          "id": 0
+        }
+      ],
+      "solver": "electrostatic_direct",
+      "showPotential": false,
+      "plotType": "quiver"
+    }
+  },
+  {
+    "id": "lecture01-2",
+    "source": "du_electromagnetism/lectures/lecture01.md:172",
+    "attributes": {
+      "meme": "{\"charges\":[{\"x\":0.5,\"y\":0.5,\"charge\":4,\"id\":0}],\"solver\":\"electrostatic_direct\",\"showPotential\":false,\"plotType\":\"fieldline\"}"
+    },
+    "state": {
+      "charges": [
+        {
+          "x": 0.5,
+          "y": 0.5,
+          "charge": 4,
+          "id": 0
+        }
+      ],
+      "solver": "electrostatic_direct",
+      "showPotential": false,
+      "plotType": "fieldline"
+    }
+  },
+  {
+    "id": "lecture02-1",
+    "source": "du_electromagnetism/lectures/lecture02.md:123",
+    "attributes": {
+      "meme": "{\"charges\":[{\"x\":0.6,\"y\":0.5,\"charge\":10,\"id\":0},{\"x\":0.4,\"y\":0.5,\"charge\":-10,\"id\":1}],\"solver\":\"electrostatic_direct\",\"showPotential\":false,\"plotType\":\"quiver\",\"perCharge\":true}",
+      "percharge-checkbox": "true"
+    },
+    "state": {
+      "charges": [
+        {
+          "x": 0.6,
+          "y": 0.5,
+          "charge": 10,
+          "id": 0
+        },
+        {
+          "x": 0.4,
+          "y": 0.5,
+          "charge": -10,
+          "id": 1
+        }
+      ],
+      "solver": "electrostatic_direct",
+      "showPotential": false,
+      "plotType": "quiver",
+      "perCharge": true
+    }
+  },
+  {
+    "id": "lecture03-1",
+    "source": "du_electromagnetism/lectures/lecture03.md:66",
+    "attributes": {
+      "fieldlines-checkbox": "yes",
+      "meme": "{\"charges\":[{\"x\":0.20,\"y\":0.50,\"charge\":2,\"id\":0,\"strokeStyle\":\"black\",\"lineWidth\":2},{\"x\":0.80,\"y\":0.50,\"charge\":-2,\"id\":1,\"strokeStyle\":\"black\",\"lineWidth\":2}],\"solver\":\"electrostatic_direct\",\"show_potential\":false}"
+    },
+    "state": {
+      "charges": [
+        {
+          "x": 0.2,
+          "y": 0.5,
+          "charge": 2,
+          "id": 0,
+          "strokeStyle": "black",
+          "lineWidth": 2
+        },
+        {
+          "x": 0.8,
+          "y": 0.5,
+          "charge": -2,
+          "id": 1,
+          "strokeStyle": "black",
+          "lineWidth": 2
+        }
+      ],
+      "solver": "electrostatic_direct",
+      "show_potential": false
+    }
+  },
+  {
+    "id": "lecture03-2",
+    "source": "du_electromagnetism/lectures/lecture03.md:98",
+    "attributes": {
+      "dipole-checkbox": "yes",
+      "meme": "{\"charges\":[{\"x\":0.4,\"y\":0.35,\"charge\":1.5,\"id\":100,\"isTestCharge\":true,\"dipoleWith\":101},{\"x\":0.6,\"y\":0.75,\"charge\":-1.5,\"id\":101,\"isTestCharge\":true,\"dipoleWith\":100}],\"solver\":\"electrostatic_direct\",\"showPotential\":false,\"plotType\":\"fieldline\",\"perCharge\":false,\"uniformElecX\":400,\"uniformElecY\":0,\"dipoleMode\":true}"
+    },
+    "state": {
+      "charges": [
+        {
+          "x": 0.4,
+          "y": 0.35,
+          "charge": 1.5,
+          "id": 100,
+          "isTestCharge": true,
+          "dipoleWith": 101
+        },
+        {
+          "x": 0.6,
+          "y": 0.75,
+          "charge": -1.5,
+          "id": 101,
+          "isTestCharge": true,
+          "dipoleWith": 100
+        }
+      ],
+      "solver": "electrostatic_direct",
+      "showPotential": false,
+      "plotType": "fieldline",
+      "perCharge": false,
+      "uniformElecX": 400,
+      "uniformElecY": 0,
+      "dipoleMode": true
+    }
+  },
+  {
+    "id": "lecture04-1",
+    "source": "du_electromagnetism/lectures/lecture04.md:196",
+    "attributes": {
+      "meme": "{\"charges\":[{\"x\":0.3,\"y\":0.5,\"charge\":2,\"id\":0},{\"x\":0.7,\"y\":0.5,\"charge\":2,\"id\":1}],\"solver\":\"electrostatic_direct\",\"showPotential\":true,\"plotType\":\"fieldline\"}"
+    },
+    "state": {
+      "charges": [
+        {
+          "x": 0.3,
+          "y": 0.5,
+          "charge": 2,
+          "id": 0
+        },
+        {
+          "x": 0.7,
+          "y": 0.5,
+          "charge": 2,
+          "id": 1
+        }
+      ],
+      "solver": "electrostatic_direct",
+      "showPotential": true,
+      "plotType": "fieldline"
+    }
+  },
+  {
+    "id": "lecture04-2",
+    "source": "du_electromagnetism/lectures/lecture04.md:200",
+    "attributes": {
+      "meme": "{\"charges\":[{\"x\":0.3,\"y\":0.5,\"charge\":2,\"id\":0},{\"x\":0.7,\"y\":0.5,\"charge\":-2,\"id\":1}],\"solver\":\"electrostatic_direct\",\"showPotential\":true,\"plotType\":\"fieldline\"}"
+    },
+    "state": {
+      "charges": [
+        {
+          "x": 0.3,
+          "y": 0.5,
+          "charge": 2,
+          "id": 0
+        },
+        {
+          "x": 0.7,
+          "y": 0.5,
+          "charge": -2,
+          "id": 1
+        }
+      ],
+      "solver": "electrostatic_direct",
+      "showPotential": true,
+      "plotType": "fieldline"
+    }
+  },
+  {
+    "id": "lecture05-1",
+    "source": "du_electromagnetism/lectures/lecture05.md:24",
+    "attributes": {
+      "meme": "{\"charges\":[{\"x\":0.3,\"y\":0.5,\"charge\":2,\"id\":0},{\"x\":0.7,\"y\":0.5,\"charge\":-2,\"id\":1}],\"solver\":\"electrostatic_direct\",\"showPotential\":false,\"plotType\":\"fieldline\"}",
+      "gaussian-surface": "yes"
+    },
+    "state": {
+      "charges": [
+        {
+          "x": 0.3,
+          "y": 0.5,
+          "charge": 2,
+          "id": 0
+        },
+        {
+          "x": 0.7,
+          "y": 0.5,
+          "charge": -2,
+          "id": 1
+        }
+      ],
+      "solver": "electrostatic_direct",
+      "showPotential": false,
+      "plotType": "fieldline"
+    }
+  },
+  {
+    "id": "lecture06-1",
+    "source": "du_electromagnetism/lectures/lecture06.md:112",
+    "attributes": {
+      "meme": "{\"charges\":[{\"x\":0.5392624706391608,\"y\":0.14653179149709897,\"charge\":-1,\"id\":12},{\"x\":0.5555314549806049,\"y\":0.1814306351199232,\"charge\":1,\"id\":13},{\"x\":0.15260303719011728,\"y\":0.35484103997872374,\"charge\":-1,\"id\":0},{\"x\":0.1576464250765891,\"y\":0.3149566472669246,\"charge\":1,\"id\":1},{\"x\":0.5018438157892534,\"y\":0.6379335247949719,\"charge\":-1,\"id\":2},{\"x\":0.5143709346457067,\"y\":0.6080202302611226,\"charge\":1,\"id\":3},{\"x\":0.8099240740534912,\"y\":0.45404624494390544,\"charge\":-1,\"id\":4},{\"x\":0.7900216920400248,\"y\":0.429118499499031,\"charge\":1,\"id\":5},{\"x\":0.7350867643536764,\"y\":0.8135838157911018,\"charge\":-1,\"id\":6},{\"x\":0.7176789593302038,\"y\":0.8434971103249512,\"charge\":1,\"id\":7}],\"solver\":\"electrostatic_fourier\",\"showPotential\":false,\"plotType\":\"quiver\",\"perCharge\":false,\"uniformElecX\":9000,\"uniformElecY\":0}"
+    },
+    "state": {
+      "charges": [
+        {
+          "x": 0.5392624706391608,
+          "y": 0.14653179149709897,
+          "charge": -1,
+          "id": 12
+        },
+        {
+          "x": 0.5555314549806049,
+          "y": 0.1814306351199232,
+          "charge": 1,
+          "id": 13
+        },
+        {
+          "x": 0.15260303719011728,
+          "y": 0.35484103997872374,
+          "charge": -1,
+          "id": 0
+        },
+        {
+          "x": 0.1576464250765891,
+          "y": 0.3149566472669246,
+          "charge": 1,
+          "id": 1
+        },
+        {
+          "x": 0.5018438157892534,
+          "y": 0.6379335247949719,
+          "charge": -1,
+          "id": 2
+        },
+        {
+          "x": 0.5143709346457067,
+          "y": 0.6080202302611226,
+          "charge": 1,
+          "id": 3
+        },
+        {
+          "x": 0.8099240740534912,
+          "y": 0.45404624494390544,
+          "charge": -1,
+          "id": 4
+        },
+        {
+          "x": 0.7900216920400248,
+          "y": 0.429118499499031,
+          "charge": 1,
+          "id": 5
+        },
+        {
+          "x": 0.7350867643536764,
+          "y": 0.8135838157911018,
+          "charge": -1,
+          "id": 6
+        },
+        {
+          "x": 0.7176789593302038,
+          "y": 0.8434971103249512,
+          "charge": 1,
+          "id": 7
+        }
+      ],
+      "solver": "electrostatic_fourier",
+      "showPotential": false,
+      "plotType": "quiver",
+      "perCharge": false,
+      "uniformElecX": 9000,
+      "uniformElecY": 0
+    }
+  },
+  {
+    "id": "lecture09-1",
+    "source": "du_electromagnetism/lectures/lecture09.md:72",
+    "attributes": {
+      "meme": "{\"charges\":[{\"x\":0.43266832917705733,\"y\":0.43853820598006643,\"charge\":2,\"id\":0}],\"solver\":\"magnetostatic_direct\",\"showPotential\":true,\"plotType\":\"quiver\",\"perCharge\":false,\"uniformElecX\":0,\"uniformElecY\":0}",
+      "fieldlines-checkbox": "true"
+    },
+    "state": {
+      "charges": [
+        {
+          "x": 0.43266832917705733,
+          "y": 0.43853820598006643,
+          "charge": 2,
+          "id": 0
+        }
+      ],
+      "solver": "magnetostatic_direct",
+      "showPotential": true,
+      "plotType": "quiver",
+      "perCharge": false,
+      "uniformElecX": 0,
+      "uniformElecY": 0
+    }
+  },
+  {
+    "id": "lecture09-2",
+    "source": "du_electromagnetism/lectures/lecture09.md:103",
+    "attributes": {
+      "meme": "{\"charges\":[{\"x\":0.2,\"y\":0.5,\"charge\":-2,\"id\":0},{\"x\":0.8,\"y\":0.5,\"charge\":-2,\"id\":1,\"isTestCharge\":true}],\"solver\":\"magnetostatic_direct\",\"showPotential\":true,\"plotType\":\"quiver\",\"perCharge\":false,\"uniformElecX\":0,\"uniformElecY\":0}"
+    },
+    "state": {
+      "charges": [
+        {
+          "x": 0.2,
+          "y": 0.5,
+          "charge": -2,
+          "id": 0
+        },
+        {
+          "x": 0.8,
+          "y": 0.5,
+          "charge": -2,
+          "id": 1,
+          "isTestCharge": true
+        }
+      ],
+      "solver": "magnetostatic_direct",
+      "showPotential": true,
+      "plotType": "quiver",
+      "perCharge": false,
+      "uniformElecX": 0,
+      "uniformElecY": 0
+    }
+  },
+  {
+    "id": "lecture10-1",
+    "source": "du_electromagnetism/lectures/lecture10.md:106",
+    "attributes": {
+      "meme": "{\"charges\":[{\"x\":0.6,\"y\":0.5,\"charge\":10,\"id\":0},{\"x\":0.4,\"y\":0.5,\"charge\":10,\"id\":1}],\"solver\":\"magnetostatic_direct\",\"showPotential\":false,\"plotType\":\"quiver\",\"perCharge\":true}",
+      "percharge-checkbox": "true"
+    },
+    "state": {
+      "charges": [
+        {
+          "x": 0.6,
+          "y": 0.5,
+          "charge": 10,
+          "id": 0
+        },
+        {
+          "x": 0.4,
+          "y": 0.5,
+          "charge": 10,
+          "id": 1
+        }
+      ],
+      "solver": "magnetostatic_direct",
+      "showPotential": false,
+      "plotType": "quiver",
+      "perCharge": true
+    }
+  },
+  {
+    "id": "lecture10-2",
+    "source": "du_electromagnetism/lectures/lecture10.md:110",
+    "attributes": {
+      "meme": "{\"charges\":[{\"x\":0.6,\"y\":0.5,\"charge\":10,\"id\":0},{\"x\":0.4,\"y\":0.5,\"charge\":-10,\"id\":1}],\"solver\":\"magnetostatic_direct\",\"showPotential\":false,\"plotType\":\"quiver\",\"perCharge\":true}",
+      "percharge-checkbox": "true"
+    },
+    "state": {
+      "charges": [
+        {
+          "x": 0.6,
+          "y": 0.5,
+          "charge": 10,
+          "id": 0
+        },
+        {
+          "x": 0.4,
+          "y": 0.5,
+          "charge": -10,
+          "id": 1
+        }
+      ],
+      "solver": "magnetostatic_direct",
+      "showPotential": false,
+      "plotType": "quiver",
+      "perCharge": true
+    }
+  },
+  {
+    "id": "lecture10-3",
+    "source": "du_electromagnetism/lectures/lecture10.md:114",
+    "attributes": {
+      "meme": "{\"charges\":[{\"x\":0.6,\"y\":0.5,\"charge\":10,\"id\":0},{\"x\":0.4,\"y\":0.5,\"charge\":-10,\"id\":1}],\"solver\":\"magnetostatic_direct\",\"showPotential\":false,\"plotType\":\"fieldline\",\"perCharge\":false}"
+    },
+    "state": {
+      "charges": [
+        {
+          "x": 0.6,
+          "y": 0.5,
+          "charge": 10,
+          "id": 0
+        },
+        {
+          "x": 0.4,
+          "y": 0.5,
+          "charge": -10,
+          "id": 1
+        }
+      ],
+      "solver": "magnetostatic_direct",
+      "showPotential": false,
+      "plotType": "fieldline",
+      "perCharge": false
+    }
+  },
+  {
+    "id": "lecture11-1",
+    "source": "du_electromagnetism/lectures/lecture11.md:92",
+    "attributes": {
+      "dipole-checkbox": "yes",
+      "meme": "{\"charges\":[{\"x\":0.4,\"y\":0.6,\"charge\":1,\"id\":100,\"isTestCharge\":true,\"dipoleWith\":101},{\"x\":0.6,\"y\":0.6,\"charge\":-1,\"id\":101,\"isTestCharge\":true,\"dipoleWith\":100}],\"solver\":\"magnetostatic_direct\",\"showPotential\":false,\"plotType\":\"fieldline\",\"perCharge\":false,\"uniformElecX\":750,\"uniformElecY\":0,\"dipoleMode\":true}"
+    },
+    "state": {
+      "charges": [
+        {
+          "x": 0.4,
+          "y": 0.6,
+          "charge": 1,
+          "id": 100,
+          "isTestCharge": true,
+          "dipoleWith": 101
+        },
+        {
+          "x": 0.6,
+          "y": 0.6,
+          "charge": -1,
+          "id": 101,
+          "isTestCharge": true,
+          "dipoleWith": 100
+        }
+      ],
+      "solver": "magnetostatic_direct",
+      "showPotential": false,
+      "plotType": "fieldline",
+      "perCharge": false,
+      "uniformElecX": 750,
+      "uniformElecY": 0,
+      "dipoleMode": true
+    }
+  },
+  {
+    "id": "lecture11-2",
+    "source": "du_electromagnetism/lectures/lecture11.md:99",
+    "attributes": {
+      "dipole-checkbox": "yes",
+      "meme": "{\"charges\":[{\"x\":0.4,\"y\":0.3,\"charge\":1,\"id\":100,\"isTestCharge\":true,\"dipoleWith\":101},{\"x\":0.6,\"y\":0.3,\"charge\":-1,\"id\":101,\"isTestCharge\":true,\"dipoleWith\":100},{\"x\":0.4,\"y\":0.8,\"charge\":1,\"id\":0,\"isTestCharge\":false,\"dipoleWith\":1},{\"x\":0.6,\"y\":0.8,\"charge\":-1,\"id\":1,\"isTestCharge\":false,\"dipoleWith\":0}],\"solver\":\"magnetostatic_direct\",\"showPotential\":false,\"plotType\":\"fieldline\",\"perCharge\":false,\"uniformElecX\":0,\"uniformElecY\":0,\"dipoleMode\":true}"
+    },
+    "state": {
+      "charges": [
+        {
+          "x": 0.4,
+          "y": 0.3,
+          "charge": 1,
+          "id": 100,
+          "isTestCharge": true,
+          "dipoleWith": 101
+        },
+        {
+          "x": 0.6,
+          "y": 0.3,
+          "charge": -1,
+          "id": 101,
+          "isTestCharge": true,
+          "dipoleWith": 100
+        },
+        {
+          "x": 0.4,
+          "y": 0.8,
+          "charge": 1,
+          "id": 0,
+          "isTestCharge": false,
+          "dipoleWith": 1
+        },
+        {
+          "x": 0.6,
+          "y": 0.8,
+          "charge": -1,
+          "id": 1,
+          "isTestCharge": false,
+          "dipoleWith": 0
+        }
+      ],
+      "solver": "magnetostatic_direct",
+      "showPotential": false,
+      "plotType": "fieldline",
+      "perCharge": false,
+      "uniformElecX": 0,
+      "uniformElecY": 0,
+      "dipoleMode": true
+    }
+  },
+  {
+    "id": "lecture12-1",
+    "source": "du_electromagnetism/lectures/lecture12.md:22",
+    "attributes": {
+      "meme": "{\"charges\":[{\"x\":0.38,\"y\":0.5,\"charge\":2,\"id\":0,\"dipoleWith\":1},{\"x\":0.62,\"y\":0.5,\"charge\":-2,\"id\":1,\"dipoleWith\":0}],\"solver\":\"electrostatic_direct\",\"showPotential\":false,\"plotType\":\"fieldline\",\"perCharge\":false,\"uniformElecX\":0,\"uniformElecY\":0,\"dipoleMode\":true}"
+    },
+    "state": {
+      "charges": [
+        {
+          "x": 0.38,
+          "y": 0.5,
+          "charge": 2,
+          "id": 0,
+          "dipoleWith": 1
+        },
+        {
+          "x": 0.62,
+          "y": 0.5,
+          "charge": -2,
+          "id": 1,
+          "dipoleWith": 0
+        }
+      ],
+      "solver": "electrostatic_direct",
+      "showPotential": false,
+      "plotType": "fieldline",
+      "perCharge": false,
+      "uniformElecX": 0,
+      "uniformElecY": 0,
+      "dipoleMode": true
+    }
+  },
+  {
+    "id": "lecture12-2",
+    "source": "du_electromagnetism/lectures/lecture12.md:27",
+    "attributes": {
+      "meme": "{\"charges\":[{\"x\":0.5,\"y\":0.38,\"charge\":-1,\"id\":0,\"dipoleWith\":1},{\"x\":0.5,\"y\":0.62,\"charge\":1,\"id\":1,\"dipoleWith\":0}],\"solver\":\"magnetostatic_direct\",\"showPotential\":false,\"plotType\":\"fieldline\",\"perCharge\":false,\"uniformElecX\":0,\"uniformElecY\":0,\"dipoleMode\":true,\"extraDrawInfo\": {\"magFieldlineLevels\": [-300, -50, -5.0, 5.0, 50, 300 ]}}"
+    },
+    "state": {
+      "charges": [
+        {
+          "x": 0.5,
+          "y": 0.38,
+          "charge": -1,
+          "id": 0,
+          "dipoleWith": 1
+        },
+        {
+          "x": 0.5,
+          "y": 0.62,
+          "charge": 1,
+          "id": 1,
+          "dipoleWith": 0
+        }
+      ],
+      "solver": "magnetostatic_direct",
+      "showPotential": false,
+      "plotType": "fieldline",
+      "perCharge": false,
+      "uniformElecX": 0,
+      "uniformElecY": 0,
+      "dipoleMode": true,
+      "extraDrawInfo": {
+        "magFieldlineLevels": [
+          -300,
+          -50,
+          -5,
+          5,
+          50,
+          300
+        ]
+      }
+    }
+  },
+  {
+    "id": "lecture12-3",
+    "source": "du_electromagnetism/lectures/lecture12.md:51",
+    "attributes": {
+      "meme": "{\"charges\":[{\"x\":0.43640897755610975,\"y\":0.2956810631229236,\"charge\":-2,\"id\":4},{\"x\":0.5897755610972568,\"y\":0.39368770764119604,\"charge\":-2,\"id\":5},{\"x\":0.7605985037406484,\"y\":0.6229235880398671,\"charge\":-2,\"id\":6},{\"x\":0.4975062344139651,\"y\":0.8853820598006644,\"charge\":-2,\"id\":7},{\"x\":0.22942643391521197,\"y\":0.5548172757475083,\"charge\":-2,\"id\":8},{\"x\":0.513715710723192,\"y\":0.23255813953488372,\"charge\":2,\"id\":9},{\"x\":0.15211970074812967,\"y\":0.24750830564784054,\"charge\":2,\"id\":10},{\"x\":0.314214463840399,\"y\":0.1744186046511628,\"charge\":2,\"id\":11},{\"x\":0.23316708229426433,\"y\":0.4485049833887043,\"charge\":2,\"id\":12},{\"x\":0.7394014962593516,\"y\":0.8255813953488372,\"charge\":2,\"id\":13}],\"solver\":\"magnetostatic_direct\",\"showPotential\":false,\"plotType\":\"fieldline\",\"perCharge\":false,\"uniformElecX\":0,\"uniformElecY\":0}"
+    },
+    "state": {
+      "charges": [
+        {
+          "x": 0.43640897755610975,
+          "y": 0.2956810631229236,
+          "charge": -2,
+          "id": 4
+        },
+        {
+          "x": 0.5897755610972568,
+          "y": 0.39368770764119604,
+          "charge": -2,
+          "id": 5
+        },
+        {
+          "x": 0.7605985037406484,
+          "y": 0.6229235880398671,
+          "charge": -2,
+          "id": 6
+        },
+        {
+          "x": 0.4975062344139651,
+          "y": 0.8853820598006644,
+          "charge": -2,
+          "id": 7
+        },
+        {
+          "x": 0.22942643391521197,
+          "y": 0.5548172757475083,
+          "charge": -2,
+          "id": 8
+        },
+        {
+          "x": 0.513715710723192,
+          "y": 0.23255813953488372,
+          "charge": 2,
+          "id": 9
+        },
+        {
+          "x": 0.15211970074812967,
+          "y": 0.24750830564784054,
+          "charge": 2,
+          "id": 10
+        },
+        {
+          "x": 0.314214463840399,
+          "y": 0.1744186046511628,
+          "charge": 2,
+          "id": 11
+        },
+        {
+          "x": 0.23316708229426433,
+          "y": 0.4485049833887043,
+          "charge": 2,
+          "id": 12
+        },
+        {
+          "x": 0.7394014962593516,
+          "y": 0.8255813953488372,
+          "charge": 2,
+          "id": 13
+        }
+      ],
+      "solver": "magnetostatic_direct",
+      "showPotential": false,
+      "plotType": "fieldline",
+      "perCharge": false,
+      "uniformElecX": 0,
+      "uniformElecY": 0
+    }
+  },
+  {
+    "id": "lecture12-4",
+    "source": "du_electromagnetism/lectures/lecture12.md:78",
+    "attributes": {
+      "meme": "{\"charges\":[{\"x\":0.3,\"y\":0.5,\"charge\":1,\"id\":0},{\"x\":0.7,\"y\":0.5,\"charge\":-1,\"id\":1}],\"solver\":\"magnetostatic_direct\",\"showPotential\":false,\"plotType\":\"fieldline\"}",
+      "gaussian-surface": "yes"
+    },
+    "state": {
+      "charges": [
+        {
+          "x": 0.3,
+          "y": 0.5,
+          "charge": 1,
+          "id": 0
+        },
+        {
+          "x": 0.7,
+          "y": 0.5,
+          "charge": -1,
+          "id": 1
+        }
+      ],
+      "solver": "magnetostatic_direct",
+      "showPotential": false,
+      "plotType": "fieldline"
+    }
+  },
+  {
+    "id": "lecture14-1",
+    "source": "du_electromagnetism/lectures/lecture14.md:45",
+    "attributes": {
+      "meme": "{\"charges\":[{\"x\":0.7,\"y\":0.5,\"charge\":3,\"id\":0},{\"x\":0.3,\"y\":0.5,\"charge\":-3,\"id\":1,\"isTestCharge\":false}],\"solver\":\"electrostatic_fourier\",\"showPotential\":false,\"plotType\":\"quiver\",\"perCharge\":false,\"uniformElecX\":0,\"uniformElecY\":0}"
+    },
+    "state": {
+      "charges": [
+        {
+          "x": 0.7,
+          "y": 0.5,
+          "charge": 3,
+          "id": 0
+        },
+        {
+          "x": 0.3,
+          "y": 0.5,
+          "charge": -3,
+          "id": 1,
+          "isTestCharge": false
+        }
+      ],
+      "solver": "electrostatic_fourier",
+      "showPotential": false,
+      "plotType": "quiver",
+      "perCharge": false,
+      "uniformElecX": 0,
+      "uniformElecY": 0
+    }
+  },
+  {
+    "id": "lecture14-2",
+    "source": "du_electromagnetism/lectures/lecture14.md:50",
+    "attributes": {
+      "meme": "{\"charges\":[{\"x\":0.7,\"y\":0.5,\"charge\":3,\"id\":0},{\"x\":0.3,\"y\":0.5,\"charge\":-3,\"id\":1,\"isTestCharge\":false}],\"solver\":\"dynamic\",\"showPotential\":false,\"plotType\":\"quiver\",\"perCharge\":false,\"uniformElecX\":0,\"uniformElecY\":0}"
+    },
+    "state": {
+      "charges": [
+        {
+          "x": 0.7,
+          "y": 0.5,
+          "charge": 3,
+          "id": 0
+        },
+        {
+          "x": 0.3,
+          "y": 0.5,
+          "charge": -3,
+          "id": 1,
+          "isTestCharge": false
+        }
+      ],
+      "solver": "dynamic",
+      "showPotential": false,
+      "plotType": "quiver",
+      "perCharge": false,
+      "uniformElecX": 0,
+      "uniformElecY": 0
+    }
+  },
+  {
+    "id": "lecture16-1",
+    "source": "du_electromagnetism/lectures/lecture16.md:118",
+    "attributes": {
+      "meme": "{\"charges\":[{\"x\":0.5,\"y\":0.5,\"charge\":2,\"id\":0},{\"x\":0.5,\"y\":0.5,\"charge\":-2,\"id\":1,\"isTestCharge\":false}],\"solver\":\"dynamic\",\"showPotential\":false,\"plotType\":\"quiver\",\"perCharge\":false,\"uniformElecX\":0,\"uniformElecY\":0}"
+    },
+    "state": {
+      "charges": [
+        {
+          "x": 0.5,
+          "y": 0.5,
+          "charge": 2,
+          "id": 0
+        },
+        {
+          "x": 0.5,
+          "y": 0.5,
+          "charge": -2,
+          "id": 1,
+          "isTestCharge": false
+        }
+      ],
+      "solver": "dynamic",
+      "showPotential": false,
+      "plotType": "quiver",
+      "perCharge": false,
+      "uniformElecX": 0,
+      "uniformElecY": 0
+    }
+  },
+  {
+    "id": "embed_test-1",
+    "source": "embed_test.html:20",
+    "attributes": {
+      "meme": "{\"charges\":[{\"x\":0.520242314616122,\"y\":0.4196330419027168,\"charge\":-3,\"id\":0,\"strokeStyle\":\"black\",\"lineWidth\":2},{\"x\":0.5542019860958749,\"y\":0.17705771394667957,\"charge\":1,\"id\":1,\"strokeStyle\":\"black\",\"lineWidth\":2},{\"x\":0.22011771550276074,\"y\":0.25585703254312264,\"charge\":1,\"id\":2,\"strokeStyle\":\"black\",\"lineWidth\":2}],\"solver\":\"electrostatic_direct\",\"show_potential\":true}"
+    },
+    "state": {
+      "charges": [
+        {
+          "x": 0.520242314616122,
+          "y": 0.4196330419027168,
+          "charge": -3,
+          "id": 0,
+          "strokeStyle": "black",
+          "lineWidth": 2
+        },
+        {
+          "x": 0.5542019860958749,
+          "y": 0.17705771394667957,
+          "charge": 1,
+          "id": 1,
+          "strokeStyle": "black",
+          "lineWidth": 2
+        },
+        {
+          "x": 0.22011771550276074,
+          "y": 0.25585703254312264,
+          "charge": 1,
+          "id": 2,
+          "strokeStyle": "black",
+          "lineWidth": 2
+        }
+      ],
+      "solver": "electrostatic_direct",
+      "show_potential": true
+    }
+  },
+  {
+    "id": "embed_test-2",
+    "source": "embed_test.html:22",
+    "attributes": {
+      "fieldlines-checkbox": "yes",
+      "meme": "{\"charges\":[{\"x\":0.33730863985683995,\"y\":0.3719593822444249,\"charge\":1,\"id\":0,\"strokeStyle\":\"black\",\"lineWidth\":2},{\"x\":0.6981504406339245,\"y\":0.3677800633428021,\"charge\":-1,\"id\":1,\"strokeStyle\":\"black\",\"lineWidth\":2},{\"x\":0.26200252491205706,\"y\":0.7397394455872269,\"charge\":-1,\"id\":2,\"strokeStyle\":\"black\",\"lineWidth\":2}],\"solver\":\"electrostatic_direct\",\"show_potential\":true}"
+    },
+    "state": {
+      "charges": [
+        {
+          "x": 0.33730863985683995,
+          "y": 0.3719593822444249,
+          "charge": 1,
+          "id": 0,
+          "strokeStyle": "black",
+          "lineWidth": 2
+        },
+        {
+          "x": 0.6981504406339245,
+          "y": 0.3677800633428021,
+          "charge": -1,
+          "id": 1,
+          "strokeStyle": "black",
+          "lineWidth": 2
+        },
+        {
+          "x": 0.26200252491205706,
+          "y": 0.7397394455872269,
+          "charge": -1,
+          "id": 2,
+          "strokeStyle": "black",
+          "lineWidth": 2
+        }
+      ],
+      "solver": "electrostatic_direct",
+      "show_potential": true
+    }
+  },
+  {
+    "id": "embed_test-3",
+    "source": "embed_test.html:24",
+    "attributes": {
+      "forces-checkbox": "yes",
+      "meme": "{\"charges\":[{\"x\":0.520242314616122,\"y\":0.4196330419027168,\"charge\":-3,\"id\":0,\"strokeStyle\":\"black\",\"lineWidth\":2},{\"x\":0.5542019860958749,\"y\":0.17705771394667957,\"charge\":1,\"id\":1,\"strokeStyle\":\"black\",\"lineWidth\":2},{\"x\":0.22011771550276074,\"y\":0.25585703254312264,\"charge\":1,\"id\":2,\"strokeStyle\":\"black\",\"lineWidth\":2}],\"solver\":\"electrostatic_direct\",\"show_potential\":true}"
+    },
+    "state": {
+      "charges": [
+        {
+          "x": 0.520242314616122,
+          "y": 0.4196330419027168,
+          "charge": -3,
+          "id": 0,
+          "strokeStyle": "black",
+          "lineWidth": 2
+        },
+        {
+          "x": 0.5542019860958749,
+          "y": 0.17705771394667957,
+          "charge": 1,
+          "id": 1,
+          "strokeStyle": "black",
+          "lineWidth": 2
+        },
+        {
+          "x": 0.22011771550276074,
+          "y": 0.25585703254312264,
+          "charge": 1,
+          "id": 2,
+          "strokeStyle": "black",
+          "lineWidth": 2
+        }
+      ],
+      "solver": "electrostatic_direct",
+      "show_potential": true
+    }
+  },
+  {
+    "id": "embed_test-4",
+    "source": "embed_test.html:26",
+    "attributes": {
+      "dipole-checkbox": "yes",
+      "meme": "{\"charges\":[{\"x\":0.7304105184804918,\"y\":0.410641786809295,\"charge\":1,\"id\":100,\"isTestCharge\":true,\"dipoleWith\":101},{\"x\":0.2936886087015532,\"y\":0.409964525483064,\"charge\":-1,\"id\":101,\"isTestCharge\":true,\"dipoleWith\":100},{\"x\":0.2880299251870324,\"y\":0.8471760797342193,\"charge\":-1,\"id\":0},{\"x\":0.7231920199501247,\"y\":0.845514950166113,\"charge\":1,\"id\":1}],\"solver\":\"magnetostatic_direct\",\"showPotential\":false,\"plotType\":\"fieldline\",\"perCharge\":false,\"uniformElecX\":750,\"uniformElecY\":0,\"dipoleMode\":true}"
+    },
+    "state": {
+      "charges": [
+        {
+          "x": 0.7304105184804918,
+          "y": 0.410641786809295,
+          "charge": 1,
+          "id": 100,
+          "isTestCharge": true,
+          "dipoleWith": 101
+        },
+        {
+          "x": 0.2936886087015532,
+          "y": 0.409964525483064,
+          "charge": -1,
+          "id": 101,
+          "isTestCharge": true,
+          "dipoleWith": 100
+        },
+        {
+          "x": 0.2880299251870324,
+          "y": 0.8471760797342193,
+          "charge": -1,
+          "id": 0
+        },
+        {
+          "x": 0.7231920199501247,
+          "y": 0.845514950166113,
+          "charge": 1,
+          "id": 1
+        }
+      ],
+      "solver": "magnetostatic_direct",
+      "showPotential": false,
+      "plotType": "fieldline",
+      "perCharge": false,
+      "uniformElecX": 750,
+      "uniformElecY": 0,
+      "dipoleMode": true
+    }
+  },
+  {
+    "id": "embed_test-5",
+    "source": "embed_test.html:28",
+    "attributes": {
+      "dipole-checkbox": "yes",
+      "meme": "{\"charges\":[{\"x\":0.4,\"y\":0.3,\"charge\":1,\"id\":100,\"isTestCharge\":true,\"dipoleWith\":101},{\"x\":0.6,\"y\":0.3,\"charge\":-1,\"id\":101,\"isTestCharge\":true,\"dipoleWith\":100},{\"x\":0.4,\"y\":0.8,\"charge\":1,\"id\":0,\"isTestCharge\":false,\"dipoleWith\":1},{\"x\":0.6,\"y\":0.8,\"charge\":-1,\"id\":1,\"isTestCharge\":false,\"dipoleWith\":0}],\"solver\":\"magnetostatic_direct\",\"showPotential\":false,\"plotType\":\"fieldline\",\"perCharge\":false,\"uniformElecX\":0,\"uniformElecY\":0,\"dipoleMode\":true}"
+    },
+    "state": {
+      "charges": [
+        {
+          "x": 0.4,
+          "y": 0.3,
+          "charge": 1,
+          "id": 100,
+          "isTestCharge": true,
+          "dipoleWith": 101
+        },
+        {
+          "x": 0.6,
+          "y": 0.3,
+          "charge": -1,
+          "id": 101,
+          "isTestCharge": true,
+          "dipoleWith": 100
+        },
+        {
+          "x": 0.4,
+          "y": 0.8,
+          "charge": 1,
+          "id": 0,
+          "isTestCharge": false,
+          "dipoleWith": 1
+        },
+        {
+          "x": 0.6,
+          "y": 0.8,
+          "charge": -1,
+          "id": 1,
+          "isTestCharge": false,
+          "dipoleWith": 0
+        }
+      ],
+      "solver": "magnetostatic_direct",
+      "showPotential": false,
+      "plotType": "fieldline",
+      "perCharge": false,
+      "uniformElecX": 0,
+      "uniformElecY": 0,
+      "dipoleMode": true
+    }
+  },
+  {
+    "id": "embed_test-6",
+    "source": "embed_test.html:30",
+    "attributes": {
+      "meme": "{\"charges\":[{\"x\":0.5,\"y\":0.4,\"charge\":-1,\"id\":0,\"dipoleWith\":1},{\"x\":0.5,\"y\":0.6,\"charge\":1,\"id\":1,\"dipoleWith\":0}],\"solver\":\"magnetostatic_direct\",\"showPotential\":false,\"plotType\":\"fieldline\",\"perCharge\":false,\"uniformElecX\":0,\"uniformElecY\":0,\"dipoleMode\":true, \"extraDrawInfo\": {\"magFieldlineLevels\": [-300, -50, -3.5, 3.5, 50, 300 ]}}"
+    },
+    "state": {
+      "charges": [
+        {
+          "x": 0.5,
+          "y": 0.4,
+          "charge": -1,
+          "id": 0,
+          "dipoleWith": 1
+        },
+        {
+          "x": 0.5,
+          "y": 0.6,
+          "charge": 1,
+          "id": 1,
+          "dipoleWith": 0
+        }
+      ],
+      "solver": "magnetostatic_direct",
+      "showPotential": false,
+      "plotType": "fieldline",
+      "perCharge": false,
+      "uniformElecX": 0,
+      "uniformElecY": 0,
+      "dipoleMode": true,
+      "extraDrawInfo": {
+        "magFieldlineLevels": [
+          -300,
+          -50,
+          -3.5,
+          3.5,
+          50,
+          300
+        ]
+      }
+    }
+  },
+  {
+    "id": "embed_test-7",
+    "source": "embed_test.html:32",
+    "attributes": {
+      "meme": "{\"charges\":[{\"x\":0.7,\"y\":0.5,\"charge\":3,\"id\":0},{\"x\":0.3,\"y\":0.5,\"charge\":-3,\"id\":1,\"isTestCharge\":false}],\"solver\":\"dynamic\",\"showPotential\":false,\"plotType\":\"quiver\",\"perCharge\":false,\"uniformElecX\":0,\"uniformElecY\":0}"
+    },
+    "state": {
+      "charges": [
+        {
+          "x": 0.7,
+          "y": 0.5,
+          "charge": 3,
+          "id": 0
+        },
+        {
+          "x": 0.3,
+          "y": 0.5,
+          "charge": -3,
+          "id": 1,
+          "isTestCharge": false
+        }
+      ],
+      "solver": "dynamic",
+      "showPotential": false,
+      "plotType": "quiver",
+      "perCharge": false,
+      "uniformElecX": 0,
+      "uniformElecY": 0
+    }
+  }
+]

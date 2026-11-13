@@ -1,0 +1,17 @@
+{
+  "name": "maxwell-meme",
+  "private": true,
+  "description": "Regression tests for the MEME electromagnetism visualiser",
+  "type": "module",
+  "scripts": {
+    "build:wasm": "cd maxwell && wasm-pack build --target web -d out",
+    "serve": "node tests/server.mjs",
+    "extract-examples": "node tests/extract-examples.mjs",
+    "test": "playwright test",
+    "test:update": "playwright test --update-snapshots",
+    "test:report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0"
+  }
+}
