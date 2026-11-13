@@ -74,20 +74,6 @@ export function expectedCheckboxes(example) {
     return boxes;
 }
 
-/**
- * KNOWN BUG: in magnetostatic fieldline plots, drawDirectionArrow() in fieldline.js
- * does not set its strokeStyle, so the arrowheads inherit whatever colour was last
- * used in the previous frame (e.g. the grey/purple dipole bar). The very first
- * render therefore differs from every later redraw of the same state.
- * Returns a description if `example` is affected, otherwise null.
- */
-export function redrawDiffersFromFirstRender(example) {
-    const s = example.state;
-    if (s.solver === 'magnetostatic_direct' && s.plotType === 'fieldline' && s.dipoleMode)
-        return 'known bug: magnetostatic fieldline arrowheads inherit the previous frame\'s strokeStyle';
-    return null;
-}
-
 export function isDynamic(example) {
     return example.state.solver === 'dynamic';
 }

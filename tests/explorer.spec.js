@@ -126,10 +126,6 @@ test.describe('explorer (index.html)', () => {
     });
 
     test('double-clicking an existing charge deletes it', async ({ page }) => {
-        // KNOWN BUG: ui.js declares deleteCharge() inside an `if` block; module code is
-        // strict, so it is block-scoped and the double-click handler throws
-        // "deleteCharge is not defined". Remove test.fail() once fixed.
-        test.fail(true, 'known bug: double-click on a charge throws ReferenceError');
         await openExplorer(page, TWO_CHARGES);
         const p = await canvasPoint(page, TWO_CHARGES.charges[1]);
         await page.mouse.dblclick(p.x, p.y);
@@ -196,13 +192,13 @@ test.describe('explorer (index.html)', () => {
     }
 
     test('button labels say "Current" for the magnetostatic solver', async ({ page }) => {
-        // KNOWN BUG: ui.js looks for '.charge-or-current' but index.html uses the
-        // class 'charge_or_current', so the labels never change. Remove test.fail() once fixed.
-        test.fail(true, 'known bug: charge/current labels are never updated');
         await openExplorer(page, TWO_CHARGES);
         await page.locator('#solver').selectOption('magnetostatic_direct');
         await advance(page);
         await expect(page.locator('#addPositiveCharge')).toHaveText('Add Current', { timeout: 1000 });
+        await page.locator('#solver').selectOption('electrostatic_direct');
+        await advance(page);
+        await expect(page.locator('#addPositiveCharge')).toHaveText('Add Charge', { timeout: 1000 });
     });
 
     const TOGGLES = [

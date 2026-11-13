@@ -539,9 +539,9 @@ function drawArrowOnFieldline(ctx, field, x_steps, y_steps, i_start, i_end) {
     drawDirectionArrow(stream_x, stream_y, E.u, E.v, ctx);
 }
 
-function drawDirectionArrow(x_position, y_position, u, v, ctx) {
+function drawDirectionArrow(x_position, y_position, u, v, ctx, color) {
     ctx.save();
-    // ctx.strokeStyle = 'black';
+    if (color !== undefined) ctx.strokeStyle = color;
     ctx.lineWidth = 1;
     ctx.translate(x_position, y_position);
     ctx.rotate(Math.atan2(v, u));
@@ -562,7 +562,7 @@ export function drawPotentialContours(charges, levels, ctx, color, show_directio
         for (let arrow of arrows) {
             const [x, y] = arrow;
             const B = compute_field_magnetostatic_direct(charges, x, y);
-            drawDirectionArrow(x, y, B.u, B.v, ctx);
+            drawDirectionArrow(x, y, B.u, B.v, ctx, color);
         }
     } else {
         contours = generate_potential_contours_at_levels(charges, levels);

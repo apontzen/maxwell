@@ -461,7 +461,7 @@ export async function main(params) {
     }
 
     function updateChargeOrCurrentLabel(charge_or_current) {
-        // find all spans with class charge_or_current and update their contents to the provided string
+        // find all spans with class charge-or-current and update their contents to the provided string
         if(chargeOrCurrentSpans!==null)
             chargeOrCurrentSpans.forEach(span => {
                 span.textContent = charge_or_current;
@@ -491,17 +491,17 @@ export async function main(params) {
             drawVectorField();
         });
 
-        function deleteCharge(charge) {
-            if(!allowAddDeleteCharge) return;
-            charges = charges.filter(c => c !== charge);
-            field.set_charges(charges);
-        }
-
         deleteChargeBtn.addEventListener('click', () => {
             deleteCharge(selectedCharge);
             deselectCharge();
             drawVectorField();
         });
+    }
+
+    function deleteCharge(charge) {
+        if(!allowAddDeleteCharge) return;
+        charges = charges.filter(c => c !== charge);
+        field.set_charges(charges);
     }
 
     function selectCharge(charge) {
