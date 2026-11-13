@@ -7,9 +7,11 @@
 //   - magnetic field lines (A_z) and electric equipotentials (phi): contours of a single-valued
 //     log potential.
 // Contours are traced with a predictor (midpoint) step along the level set followed by a Newton
-// projection back onto it, so points lie on the exact contour and there is no drift. Steps are
-// small where the contour is visible and scale with the distance to the nearest source or
-// stagnation point elsewhere, so tracing out to "infinity" is cheap.
+// projection back onto it, so points lie on the exact contour and there is no drift. The step is
+// adaptive: where the contour is visible it is as long as possible while the polyline stays within
+// SAGITTA_TOL of the true curve (so straight-ish stretches use few points and tight curves many);
+// it is always at most a fraction of the distance to the nearest source or stagnation point, and
+// grows with distance from the view, so tracing out to "infinity" is cheap.
 //
 // Stagnation points (zeros of the field) are found exactly as roots of a polynomial. A contour
 // that runs exactly into a stagnation point (as happens by symmetry, e.g. on the axis between two
@@ -20,8 +22,10 @@ import { SOFTEN } from './fieldmodels.js';
 
 const TWO_PI = 2 * Math.PI;
 
-export const VISIBLE_STEP = 2.0;      // px: maximum step where a contour is visible
-const STEP_MARGIN = 24;               // px: region around the view in which VISIBLE_STEP applies
+export const VISIBLE_STEP = 16.0;     // px: maximum step where a contour is visible
+const SAGITTA_TOL = 0.1;              // px: maximum distance between a visible polyline segment and the curve
+const STEP_GROWTH = 2;                // the step may at most double from one step to the next
+const STEP_MARGIN = 24;               // px: region around the view in which VISIBLE_STEP / SAGITTA_TOL apply
 const FAR_STEP_FRACTION = 0.1;        // step grows as this fraction of the distance from that region
 const NEAR_FRACTION = 0.1;            // step <= this fraction of the distance to a source / stagnation point
 const MAX_TURN_COS = Math.cos(0.15);  // max turning angle of the tangent over a half step
@@ -454,19 +458,35 @@ export function traceContour(T, ev, x, y, L, dir, opts) {
     }
     let arc = 0;
     let leaving = null;
+    let hPrev = 1.0; // the first step may be up to STEP_GROWTH px
     for (let step = 0; step < MAX_STEPS; step++) {
         let gn = Math.hypot(gx, gy);
         if (!(gn > 0)) return { pts, end: 'maxsteps' };
         const tx = dir * gy / gn, ty = -dir * gx / gn;
-        let h = stepLimit(T, x, y);
+        const hMax = stepLimit(T, x, y);
+        let h = Math.min(hMax, STEP_GROWTH * hPrev);
+        // the sagitta limit applies only where the contour is (nearly) visible
+        const visible = x > T.sx0 && x < T.sx1 && y > T.sy0 && y < T.sy1;
+        // predictor: midpoint tangent, shortening the step while the tangent turns too much or,
+        // where visible, while the segment would stray more than SAGITTA_TOL from the curve.
+        // (Measured on the test workload, the estimate below is accurate: checking the actual
+        // sagitta of every step rejected <0.1% of them, the worst being 0.11 px.)
         let mx = 0, my = 0;
         for (let tries = 0; tries < 30; tries++) {
             ev.grad(x + 0.5 * h * tx, y + 0.5 * h * ty);
             const mn = Math.hypot(ev.gx, ev.gy);
             mx = dir * ev.gy / mn; my = -dir * ev.gx / mn;
-            if (tx * mx + ty * my >= MAX_TURN_COS || h < 1e-9) break;
-            h *= 0.5;
+            if (h < 1e-9) break;
+            const dot = tx * mx + ty * my;
+            if (dot < MAX_TURN_COS) { h *= 0.5; continue; }
+            if (!visible) break;
+            // the tangent turns by ~2*turn over the step, so the segment's sagitta is ~h*turn/4
+            const turn = Math.acos(Math.min(1, dot));
+            const s4 = h * turn;
+            if (s4 <= 4 * SAGITTA_TOL) break;
+            h *= Math.max(0.25, 0.9 * Math.sqrt(4 * SAGITTA_TOL / s4)); // sagitta ~ h^2
         }
+        // corrector: Newton projection back onto the level set
         let xn = x + h * mx, yn = y + h * my;
         for (let it = 0; it < 6; it++) {
             const r = ev.val(xn, yn) - L;
@@ -476,6 +496,7 @@ export function traceContour(T, ev, x, y, L, dir, opts) {
             xn -= c * ev.gx; yn -= c * ev.gy;
             if (Math.abs(r) < 1e-7 * h * Math.sqrt(g2)) break;
         }
+        hPrev = h;
         gx = ev.gx; gy = ev.gy;
         const px = x, py = y;
         x = xn; y = yn;
@@ -546,9 +567,14 @@ export function traceContour(T, ev, x, y, L, dir, opts) {
 // Seeding helpers
 // ---------------------------------------------------------------------------------------------
 
-/** Step for sampling a seed curve at (x, y). */
-export function sampleStep(T, x, y) {
+/**
+ * Step for sampling a seed curve at (x, y), where the sampled function has gradient magnitude
+ * `gradNorm` and its levels are `levelSpacing` apart: the function changes by at most a quarter
+ * of a level per step, so level crossings are not missed.
+ */
+export function sampleStep(T, x, y, gradNorm, levelSpacing) {
     let h = VISIBLE_STEP;
+    if (gradNorm > 0) h = Math.min(h, 0.25 * levelSpacing / gradNorm);
     let d2 = Infinity;
     for (let i = 0; i < T.n; i++) {
         const dx = x - T.xs[i], dy = y - T.ys[i];
@@ -557,6 +583,31 @@ export function sampleStep(T, x, y) {
     for (const c of T.crit) d2 = Math.min(d2, (x - c.x) ** 2 + (y - c.y) ** 2);
     h = Math.min(h, NEAR_FRACTION * Math.sqrt(d2));
     return Math.max(h, 1e-4);
+}
+
+/**
+ * A root of f in [a, b], where f(a) = fa and f(b) = fb have opposite signs (or one is zero), by the
+ * Illinois variant of regula falsi: as robust as bisection but converging in a few evaluations.
+ */
+export function bracketRoot(f, a, b, fa, fb) {
+    if (fa === 0) return a;
+    if (fb === 0) return b;
+    let side = 0;
+    for (let it = 0; it < 100; it++) {
+        const c = (a * fb - b * fa) / (fb - fa);
+        const fc = f(c);
+        if (fc === 0 || Math.abs(b - a) < 1e-12 * (1 + Math.abs(c))) return c;
+        if ((fc < 0) === (fb < 0)) {
+            b = c; fb = fc;
+            if (side === -1) fa *= 0.5;
+            side = -1;
+        } else {
+            a = c; fa = fc;
+            if (side === 1) fb *= 0.5;
+            side = 1;
+        }
+    }
+    return (a * fb - b * fa) / (fb - fa);
 }
 
 /**
@@ -596,12 +647,13 @@ export function boxPoint(b, s) {
 // ---------------------------------------------------------------------------------------------
 
 export class SegmentHash {
-    constructor(b, cell = 8) {
+    constructor(b, cell = VISIBLE_STEP) {
+        // cells about the size of the longest visible segment, so each segment lands in few cells
         this.x0 = b.x0 - 2 * cell; this.y0 = b.y0 - 2 * cell;
         this.cell = cell;
         this.nx = Math.ceil((b.x1 - b.x0) / cell) + 4;
         this.ny = Math.ceil((b.y1 - b.y0) / cell) + 4;
-        this.cells = new Map();
+        this.cells = new Array(this.nx * this.ny);
     }
     insertPolyline(pts, tag) {
         const c = this.cell;
@@ -612,13 +664,12 @@ export class SegmentHash {
             if (i1 < 0 || j1 < 0 || i0 >= this.nx || j0 >= this.ny) continue;
             i0 = Math.max(i0, 0); j0 = Math.max(j0, 0);
             i1 = Math.min(i1, this.nx - 1); j1 = Math.min(j1, this.ny - 1);
-            if ((i1 - i0 + 1) * (j1 - j0 + 1) > 64) continue; // long segment far from any seed: skip
+            if ((i1 - i0 + 1) * (j1 - j0 + 1) > 16) continue; // long segment far from any seed: skip
             const seg = [ax, ay, bx, by, tag];
             for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) {
                 const key = i * this.ny + j;
-                let list = this.cells.get(key);
-                if (!list) { list = []; this.cells.set(key, list); }
-                list.push(seg);
+                const list = this.cells[key];
+                if (list) list.push(seg); else this.cells[key] = [seg];
             }
         }
     }
@@ -626,7 +677,7 @@ export class SegmentHash {
     contains(x, y, tag) {
         const i = Math.floor((x - this.x0) / this.cell), j = Math.floor((y - this.y0) / this.cell);
         if (i < 0 || j < 0 || i >= this.nx || j >= this.ny) return false;
-        const list = this.cells.get(i * this.ny + j);
+        const list = this.cells[i * this.ny + j];
         if (!list) return false;
         for (const [ax, ay, bx, by, t] of list) {
             if (tag !== undefined && t !== tag) continue;

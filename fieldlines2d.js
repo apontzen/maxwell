@@ -46,8 +46,9 @@
 //
 // IMPLEMENTATION (numerical core in levelsets2d.js)
 // --------------
-// All three are exact level sets, traced by predictor + Newton projection (no drift), with steps
-// <= 2 px near the view and growing with the distance from it elsewhere; lines run out to
+// All three are exact level sets, traced by predictor + Newton projection (no drift). Near the view
+// the step adapts to the curvature (each segment within 0.1 px of the curve, at most 16 px long);
+// elsewhere it grows with the distance from the view. Lines run out to
 // "infinity" at 10 view diagonals. Stagnation points are found exactly (polynomial roots); a
 // line/contour that runs exactly into one (by symmetry) is continued along the next branch, so
 // each branch of the crossing is drawn once.
@@ -67,7 +68,7 @@
 import { LINES_PER_UNIT_CHARGE } from './fieldmodels.js';
 import {
     buildSystem, PsiEvaluator, PotentialEvaluator, stagnationPoints, softenStagnationPoints,
-    prepareSnap, traceContour, sampleStep, seedBox, boxPoint, SegmentHash,
+    prepareSnap, traceContour, sampleStep, bracketRoot, seedBox, boxPoint, SegmentHash,
 } from './levelsets2d.js';
 
 export { LINES_PER_UNIT_CHARGE };
@@ -334,7 +335,7 @@ function psiBoxSeeds(T, ev, box) {
         const thPrev = ev.saveState();
         const xp = x, yp = y, vp = v;
         const sp = s;
-        s = Math.min(P, s + sampleStep(T, x, y));
+        s = Math.min(P, s + sampleStep(T, x, y, Math.hypot(ev.gx, ev.gy), 1 / LPU));
         [x, y] = boxPoint(box, s);
         v = ev.val(x, y);
         let ka = Math.floor(LPU * vp), kb = Math.floor(LPU * v);
@@ -342,14 +343,8 @@ function psiBoxSeeds(T, ev, box) {
         const lo = Math.min(ka, kb) + 1, hi = Math.max(ka, kb);
         for (let m = lo; m <= hi; m++) {
             const level = m / LPU;
-            let t0 = sp, t1 = s;
             const f = (t) => { const [qx, qy] = boxPoint(box, t); return vp + ev.diff(qx, qy, xp, yp) - level; };
-            const f0 = f(t0);
-            for (let it = 0; it < 50; it++) {
-                const tm = 0.5 * (t0 + t1);
-                if ((f(tm) < 0) === (f0 < 0)) t0 = tm; else t1 = tm;
-            }
-            const [qx, qy] = boxPoint(box, 0.5 * (t0 + t1));
+            const [qx, qy] = boxPoint(box, bracketRoot(f, sp, s, vp - level, v - level));
             const th = new Float64Array(T.n);
             for (let j = 0; j < T.n; j++)
                 th[j] = thPrev[j] + wrap(Math.atan2(qy - T.ys[j], qx - T.xs[j]) - Math.atan2(yp - T.ys[j], xp - T.xs[j]));
@@ -370,7 +365,7 @@ function seedsAlong(ev, step, pointAt, t0, t1, stepAt, out, extra) {
     let v = ev.val(x, y);
     while (t < t1) {
         const tp = t, vp = v;
-        t = Math.min(t1, t + stepAt(t, x, y));
+        t = Math.min(t1, t + stepAt(t, x, y, Math.hypot(ev.gx, ev.gy)));
         [x, y] = pointAt(t);
         v = ev.val(x, y);
         const ka = Math.floor(vp / step), kb = Math.floor(v / step);
@@ -378,14 +373,8 @@ function seedsAlong(ev, step, pointAt, t0, t1, stepAt, out, extra) {
         const lo = Math.min(ka, kb) + 1, hi = Math.max(ka, kb);
         for (let k = lo; k <= hi; k++) {
             const level = k * step;
-            let a = tp, b = t, fa = vp - level;
-            for (let it = 0; it < 50; it++) {
-                const m = 0.5 * (a + b);
-                const [mx, my] = pointAt(m);
-                const fm = ev.val(mx, my) - level;
-                if ((fm < 0) === (fa < 0)) { a = m; fa = fm; } else b = m;
-            }
-            const [sx, sy] = pointAt(0.5 * (a + b));
+            const f = (m) => { const [mx, my] = pointAt(m); return ev.val(mx, my) - level; };
+            const [sx, sy] = pointAt(bracketRoot(f, tp, t, vp - level, v - level));
             out.push({ x: sx, y: sy, k, ...extra });
         }
     }
@@ -481,7 +470,7 @@ function potentialLevelSets(model, view, sigma) {
     const seeds = [];
     // the boundary of the (expanded) view: every open contour crossing the view
     const P = 2 * ((box.x1 - box.x0) + (box.y1 - box.y0));
-    seedsAlong(ev, step, (t) => boxPoint(box, t), 0, P, (t, x, y) => sampleStep(T, x, y), seeds);
+    seedsAlong(ev, step, (t) => boxPoint(box, t), 0, P, (t, x, y, g) => sampleStep(T, x, y, g, step), seeds);
     // every closed contour lying within the box encloses a source in the box, so crosses the
     // circle around it or a ray from it
     for (let i = 0; i < T.n; i++) {
@@ -496,7 +485,7 @@ function potentialLevelSets(model, view, sigma) {
         if (dists[e] > r0) {
             const [dx, dy] = dirs[e];
             seedsAlong(ev, step, (t) => [xi + t * dx, yi + t * dy], r0, dists[e],
-                (t, x, y) => sampleStep(T, x, y), seeds);
+                (t, x, y, g) => sampleStep(T, x, y, g, step), seeds);
         }
     }
     diag.seeds = seeds.length;

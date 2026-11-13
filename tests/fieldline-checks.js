@@ -458,8 +458,10 @@ export function compareLinesInRect(linesA, linesB, rect, { tol = 0.5, levelTol =
         const inside = l.points.filter(p => inRect(p, rect));
         // only segments near the rect matter for distances from in-rect vertices
         const near = [];
-        for (let i = 0; i + 1 < l.points.length; i++) {
-            const p = l.points[i], q = l.points[i + 1];
+        // a closed line is drawn with its closing segment (last point back to the first)
+        const pts = l.closed && l.points.length > 2 ? [...l.points, l.points[0]] : l.points;
+        for (let i = 0; i + 1 < pts.length; i++) {
+            const p = pts[i], q = pts[i + 1];
             if (Math.max(p[0], q[0]) >= rect.x0 - 10 && Math.min(p[0], q[0]) <= rect.x1 + 10 &&
                 Math.max(p[1], q[1]) >= rect.y0 - 10 && Math.min(p[1], q[1]) <= rect.y1 + 10) {
                 near.push([p, q]);
