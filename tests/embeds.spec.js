@@ -12,7 +12,7 @@
 //   - that clicks, double clicks and touch drags behave as expected.
 
 import {
-    test, expect, examples, expectedCheckboxes, isDynamic, redrawDiffersFromFirstRender, hasGaussianSurface, dipolePairs,
+    test, expect, examples, expectedCheckboxes, isDynamic, hasGaussianSurface, dipolePairs,
     grabbableCharges, sampleCharges, dragTarget, gotoExample, waitForRender, embed, canvas,
     canvasPng, canvasPixels, countDifferentPixels, colourAt, classifyColour, toPage, mouseDrag,
     mouseDrawPath, loopAround, touchDrag, advance, checkbox, installPausedClock, DYNAMIC_RUNTIME_MS,
@@ -91,9 +91,7 @@ for (const example of examples) {
                 await advance(page);
                 if (cb.checked) await expect(checkbox(page, cb.key)).toBeChecked();
                 else await expect(checkbox(page, cb.key)).not.toBeChecked();
-                if (redrawDiffersFromFirstRender(example))
-                    expect(await canvasPng(page)).toMatchSnapshot(snap(`toggle-${cb.key}-back`));
-                else if (!isDynamic(example))
+                if (!isDynamic(example))
                     expect(countDifferentPixels(before, await canvasPixels(page)),
                         'toggling twice should restore the original rendering').toBe(0);
             });
@@ -179,14 +177,12 @@ for (const example of examples) {
             await advance(page);
 
             await expect(page.locator('.charge-properties')).toHaveCount(0);
-            if (!isDynamic(example) && !redrawDiffersFromFirstRender(example))
+            if (!isDynamic(example))
                 expect(countDifferentPixels(before, await canvasPixels(page))).toBe(0);
         });
 
         if (!isDynamic(example)) {
             test('redrawing an unchanged state reproduces the first render', async ({ page }) => {
-                const issue = redrawDiffersFromFirstRender(example);
-                test.fail(!!issue, issue ?? '');
                 await gotoExample(page, example);
                 const before = await canvasPixels(page);
                 // A click in empty space triggers a redraw without changing anything
