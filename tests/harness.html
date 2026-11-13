@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MEME test harness</title>
+    <!--
+      Renders a single <meme-embed>, styled as on the lecture-notes site
+      (du_electromagnetism/_includes/head.html), with its attributes taken from the
+      query string:  harness.html?attrs=<URI-encoded JSON object of attributes>
+      This page is used by the automated tests but can also be opened by hand.
+    -->
+    <style>
+      body {
+        font-family: sans-serif;
+        margin: 0;
+        padding: 20px;
+        background: white;
+      }
+
+      /* Approximate the width of the content column in the minima theme */
+      .wrapper {
+        max-width: 740px;
+        margin: 0 auto;
+      }
+
+      /* --- copied from du_electromagnetism/_includes/head.html --- */
+      meme-embed {
+        display: flex;
+        justify-content: center;
+        width: 100%;
+        margin-top: 1em;
+        margin-bottom: 1em;
+      }
+
+      meme-embed canvas {
+        border: 1px solid lightgray;
+        border-radius: 0.5em;
+      }
+
+      .fieldlines-controls, .forces-controls, .dipole-controls, .percharge-controls {
+        position: absolute;
+        z-index: 1;
+        bottom: 0.8em;
+        left: 0.8em;
+        background-color: rgba(255, 255, 255, 0.8);
+        padding: 0.5em;
+        font-size: 0.8em;
+      }
+      /* --- end of copy --- */
+    </style>
+</head>
+<body>
+    <div class="wrapper" id="container"></div>
+    <script>
+        (function () {
+            const params = new URLSearchParams(window.location.search);
+            const attrs = JSON.parse(params.get('attrs') || '{}');
+            const el = document.createElement('meme-embed');
+            for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+            document.getElementById('container').appendChild(el);
+        })();
+    </script>
+    <script type="module">
+        import { embed } from '../ui.js';
+        embed();
+    </script>
+</body>
+</html>
