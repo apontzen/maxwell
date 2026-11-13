@@ -130,23 +130,7 @@ npm run test:update
 * WebAssembly built with Rust 1.90 (as used to deploy the lecture notes) or 1.97,
   with or without `wasm-opt`, passes against the same reference images.
 
-## Known bugs (tests marked `test.fail`)
+## Known quirks
 
-These tests are *expected* to fail on the current code. When a bug is fixed,
-Playwright reports the test as an unexpected pass. Then remove its `test.fail`
-(and, for the second bug, the `redrawDiffersFromFirstRender` special case in
-`helpers.js`).
-
-1. **Double-clicking a charge throws `ReferenceError: deleteCharge is not defined`**
-   in both embeds and the explorer. `deleteCharge` is declared inside an `if`
-   block in `ui.js`, and in (strict) module code that makes it block-scoped. In
-   the explorer this means double-click-to-delete does nothing.
-2. **Field-line direction arrows inherit the previous frame's colour** in
-   magnetostatic field-line plots. `drawDirectionArrow` in `fieldline.js` never
-   sets `strokeStyle`. With rigid current loops shown, the arrowheads are black
-   on first render and turn grey or purple after any interaction.
-3. **"Charge"/"Current" labels never switch in the explorer.** `ui.js` queries
-   `.charge-or-current`, but `index.html` uses the class `charge_or_current`.
-
-A further quirk is recorded as-is rather than marked as a bug: after resizing
+One quirk is recorded as-is rather than treated as a bug: after resizing
 the window down and back up, the canvas comes back 1 px taller than it started.

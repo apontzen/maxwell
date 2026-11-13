@@ -461,7 +461,7 @@ export async function main(params) {
     }
 
     function updateChargeOrCurrentLabel(charge_or_current) {
-        // find all spans with class charge_or_current and update their contents to the provided string
+        // find all spans with class charge-or-current and update their contents to the provided string
         if(chargeOrCurrentSpans!==null)
             chargeOrCurrentSpans.forEach(span => {
                 span.textContent = charge_or_current;
