@@ -198,10 +198,6 @@ for (const example of examples) {
         }
 
         test('double-clicking a charge does not alter the embed', async ({ page }) => {
-            // KNOWN BUG in ui.js: deleteCharge() is declared inside an `if` block, so
-            // double-clicking a charge in an embed throws "deleteCharge is not defined".
-            // Remove this test.fail() once fixed.
-            test.fail(true, 'known bug: double-click on a charge throws ReferenceError');
             await gotoExample(page, example);
             const before = await canvasPixels(page);
             const onCharge = await toPage(page, charges[grabbableCharges(example)[0]]);

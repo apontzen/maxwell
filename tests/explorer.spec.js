@@ -126,10 +126,6 @@ test.describe('explorer (index.html)', () => {
     });
 
     test('double-clicking an existing charge deletes it', async ({ page }) => {
-        // KNOWN BUG: ui.js declares deleteCharge() inside an `if` block; module code is
-        // strict, so it is block-scoped and the double-click handler throws
-        // "deleteCharge is not defined". Remove test.fail() once fixed.
-        test.fail(true, 'known bug: double-click on a charge throws ReferenceError');
         await openExplorer(page, TWO_CHARGES);
         const p = await canvasPoint(page, TWO_CHARGES.charges[1]);
         await page.mouse.dblclick(p.x, p.y);

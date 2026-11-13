@@ -491,17 +491,17 @@ export async function main(params) {
             drawVectorField();
         });
 
-        function deleteCharge(charge) {
-            if(!allowAddDeleteCharge) return;
-            charges = charges.filter(c => c !== charge);
-            field.set_charges(charges);
-        }
-
         deleteChargeBtn.addEventListener('click', () => {
             deleteCharge(selectedCharge);
             deselectCharge();
             drawVectorField();
         });
+    }
+
+    function deleteCharge(charge) {
+        if(!allowAddDeleteCharge) return;
+        charges = charges.filter(c => c !== charge);
+        field.set_charges(charges);
     }
 
     function selectCharge(charge) {
