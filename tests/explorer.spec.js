@@ -3,7 +3,7 @@
 
 import {
     test, expect, waitForRender, canvasPixels, countDifferentPixels, colourAt,
-    classifyColour, advance,
+    classifyColour, advance, installPausedClock,
 } from './helpers.js';
 
 const CANVAS = '#vectorFieldCanvas';
@@ -28,14 +28,23 @@ const DIPOLES = {
     dipoleMode: true,
 };
 
-const SOLVERS = ['electrostatic_direct', 'electrostatic_fourier', 'dynamic', 'magnetostatic_direct'];
+const SOLVERS = ['electrostatic_direct', 'electrostatic_line_charge', 'electrostatic_fourier', 'dynamic',
+    'magnetostatic_moving_charge', 'magnetostatic_wire'];
 
 /** Which optional controls the explorer shows for each solver */
 const CONTROLS_FOR_SOLVER = {
     electrostatic_direct: { potential: true, fieldlines: true, forces: true, perCharge: true },
+    electrostatic_line_charge: { potential: true, fieldlines: true, forces: true, perCharge: true },
     electrostatic_fourier: { potential: false, fieldlines: false, forces: false, perCharge: false },
     dynamic: { potential: false, fieldlines: false, forces: false, perCharge: false },
-    magnetostatic_direct: { potential: false, fieldlines: true, forces: true, perCharge: true },
+    magnetostatic_moving_charge: { potential: false, fieldlines: true, forces: true, perCharge: true },
+    magnetostatic_wire: { potential: false, fieldlines: true, forces: true, perCharge: true },
+};
+
+/** The 2D model each 3D model switches to when field lines are shown (issue #3, D6) */
+const FIELDLINE_COUNTERPART = {
+    electrostatic_direct: 'electrostatic_line_charge',
+    magnetostatic_moving_charge: 'magnetostatic_wire',
 };
 
 const CONTROL_IDS = {
@@ -191,9 +200,12 @@ test.describe('explorer (index.html)', () => {
         });
     }
 
-    test('button labels say "Current" for the magnetostatic solver', async ({ page }) => {
+    test('button labels say "Current" for the magnetostatic solvers', async ({ page }) => {
         await openExplorer(page, TWO_CHARGES);
-        await page.locator('#solver').selectOption('magnetostatic_direct');
+        await page.locator('#solver').selectOption('magnetostatic_wire');
+        await advance(page);
+        await expect(page.locator('#addPositiveCharge')).toHaveText('Add Current', { timeout: 1000 });
+        await page.locator('#solver').selectOption('magnetostatic_moving_charge');
         await advance(page);
         await expect(page.locator('#addPositiveCharge')).toHaveText('Add Current', { timeout: 1000 });
         await page.locator('#solver').selectOption('electrostatic_direct');
@@ -206,9 +218,14 @@ test.describe('explorer (index.html)', () => {
         { id: '#fieldlines', solver: 'electrostatic_direct', state: TWO_CHARGES },
         { id: '#forces', solver: 'electrostatic_direct', state: TWO_CHARGES },
         { id: '#per-charge', solver: 'electrostatic_direct', state: TWO_CHARGES },
-        { id: '#fieldlines', solver: 'magnetostatic_direct', state: TWO_CHARGES },
-        { id: '#forces', solver: 'magnetostatic_direct', state: TWO_CHARGES },
-        { id: '#per-charge', solver: 'magnetostatic_direct', state: TWO_CHARGES },
+        { id: '#potential', solver: 'electrostatic_line_charge', state: TWO_CHARGES },
+        { id: '#fieldlines', solver: 'electrostatic_line_charge', state: TWO_CHARGES },
+        { id: '#fieldlines', solver: 'magnetostatic_moving_charge', state: TWO_CHARGES },
+        { id: '#forces', solver: 'magnetostatic_moving_charge', state: TWO_CHARGES },
+        { id: '#per-charge', solver: 'magnetostatic_moving_charge', state: TWO_CHARGES },
+        { id: '#fieldlines', solver: 'magnetostatic_wire', state: TWO_CHARGES },
+        { id: '#forces', solver: 'magnetostatic_wire', state: TWO_CHARGES },
+        { id: '#per-charge', solver: 'magnetostatic_wire', state: TWO_CHARGES },
         { id: '#dipole', solver: 'electrostatic_direct', state: DIPOLES },
     ];
     for (const { id, solver, state } of TOGGLES) {
@@ -227,6 +244,54 @@ test.describe('explorer (index.html)', () => {
             expect(countDifferentPixels(before, await pixels(page))).toBe(0);
         });
     }
+
+    for (const [solver3D, solver2D] of Object.entries(FIELDLINE_COUNTERPART)) {
+        test(`ticking field lines visibly switches "${solver3D}" to "${solver2D}" and back`, async ({ page, context }) => {
+            await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+            await openExplorer(page, { ...TWO_CHARGES, solver: solver3D });
+            const dropdown = page.locator('#solver');
+            await expect(dropdown).toHaveValue(solver3D);
+
+            await page.locator('#fieldlines').check();
+            await advance(page);
+            await expect(dropdown).toHaveValue(solver2D);
+            const viaSwitch = await pixels(page);
+
+            // The saved/copied state records the user's choice plus the tickbox, not the derived model
+            await page.locator('#copyJson').click();
+            await advance(page);
+            const copied = JSON.parse(await page.evaluate(() => navigator.clipboard.readText()));
+            expect(copied.solver).toBe(solver3D);
+            expect(copied.plotType).toBe('fieldline');
+
+            await page.locator('#fieldlines').uncheck();
+            await advance(page);
+            await expect(dropdown).toHaveValue(solver3D);
+
+            // Field lines drawn via the switch are identical to choosing the 2D model directly
+            await dropdown.selectOption(solver2D);
+            await page.locator('#fieldlines').check();
+            await advance(page);
+            expect(countDifferentPixels(viaSwitch, await pixels(page))).toBe(0);
+            // ...and having explicitly chosen the 2D model, unticking keeps it
+            await page.locator('#fieldlines').uncheck();
+            await advance(page);
+            await expect(dropdown).toHaveValue(solver2D);
+        });
+    }
+
+    test('the deprecated "magnetostatic_direct" solver name means moving charges', async ({ page, browser }) => {
+        await openExplorer(page, { ...TWO_CHARGES, solver: 'magnetostatic_direct' });
+        await expect(page.locator('#solver')).toHaveValue('magnetostatic_moving_charge');
+        const viaAlias = await pixels(page);
+
+        const other = await browser.newContext({ viewport: page.viewportSize(), deviceScaleFactor: 1 });
+        const page2 = await other.newPage();
+        await installPausedClock(page2);
+        await openExplorer(page2, { ...TWO_CHARGES, solver: 'magnetostatic_moving_charge' });
+        expect(countDifferentPixels(viaAlias, await pixels(page2))).toBe(0);
+        await other.close();
+    });
 
     test('rigid dipoles rotate and translate as a unit', async ({ page }) => {
         await openExplorer(page, DIPOLES);
