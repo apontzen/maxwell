@@ -10,7 +10,6 @@ use crate::geometry::Geometry;
 
 mod stencil;
 mod fourier;
-mod pml;
 mod geometry;
 mod contours;
 mod streamfn;
@@ -74,6 +73,8 @@ pub struct FieldConfiguration {
     elec_avg_x: Option<Array2<f64>>,
     elec_avg_y: Option<Array2<f64>>,
     ticks_since_divergence_cleaning: usize,
+    divergence_dirty: bool,
+    currents_nonzero: bool,
 }
 
 /// Damping rates in the absorbing layer ramp linearly from 0 at its inner edge to this (per unit time).
@@ -156,7 +157,7 @@ impl FieldConfiguration {
             cic_grid: None, elec_x: None, elec_y: None, mag_z: None, current_x: None, current_y: None,
             stencils: stencil::Stencils::new(geometry_clone), charge_normalization, 
             elec_uniform_x: 0.0, elec_uniform_y: 0.0, stream_solver: None,
-            elec_avg_x: None, elec_avg_y: None, ticks_since_divergence_cleaning: 0 }
+            elec_avg_x: None, elec_avg_y: None, ticks_since_divergence_cleaning: 0, divergence_dirty: false, currents_nonzero: false }
     }
 
     pub fn set_charges(&mut self, charges: JsValue) {
@@ -269,8 +270,11 @@ impl FieldConfiguration {
         let (dx, dy) = (self.geometry.delta_x(), self.geometry.delta_y());
         let mut jx = self.current_x.take().unwrap();
         let mut jy = self.current_y.take().unwrap();
-        jx.fill(0.0);
-        jy.fill(0.0);
+        let mut moved = false;
+        if self.currents_nonzero {
+            jx.fill(0.0);
+            jy.fill(0.0);
+        }
 
         if self.charges.len() != self.charges_at_last_tick.len() {
             panic!("Number of charges changed since last tick");
@@ -284,6 +288,7 @@ impl FieldConfiguration {
                 || !self.in_physical_region(charge_earlier) || !self.in_physical_region(charge_now) {
                 continue;
             }
+            moved = true;
             let q = charge_now.charge * self.charge_normalization;
             let (sx0, wx0) = self.stencils.gaussian_weights(charge_earlier.x, dx);
             let (sx1, wx1) = self.stencils.gaussian_weights(charge_now.x, dx);
@@ -317,10 +322,13 @@ impl FieldConfiguration {
         // Remove the mean current (a uniform neutralising background current, as is usual for periodic
         // domains). On the periodic grid the mean of E obeys d<E>/dt = -<j>, so otherwise moving a charge
         // would leave a uniform field behind; the divergence of j, and so Gauss's law, is unchanged.
-        let n = jx.len() as f64;
-        let (mean_x, mean_y) = (jx.sum() / n, jy.sum() / n);
-        jx.mapv_inplace(|v| v - mean_x);
-        jy.mapv_inplace(|v| v - mean_y);
+        if moved {
+            let n = jx.len() as f64;
+            let (mean_x, mean_y) = (jx.sum() / n, jy.sum() / n);
+            jx.mapv_inplace(|v| v - mean_x);
+            jy.mapv_inplace(|v| v - mean_y);
+        }
+        self.currents_nonzero = moved;
         self.current_x = Some(jx);
         self.current_y = Some(jy);
         
@@ -352,43 +360,69 @@ impl FieldConfiguration {
         } 
 
 
-        // Evolve Bz field first, to get it from half a tick behind to half a tick ahead of the E field
-        for (i, j, sigma_x, sigma_y) in pml::pml_iterator_from_geometry(&self.geometry) {
-            
-            let d_elec_x_dy = self.stencils.evaluate(&elec_x, i, j, &stencil::StencilType::GradY, &stencil::DifferenceType::Forward);
-            let d_elec_y_dx = self.stencils.evaluate(&elec_y, i, j, &stencil::StencilType::GradX, &stencil::DifferenceType::Forward);
+        // The updates below are written over flat slices (index i * ny + j, periodic wrap at the
+        // edges) for speed; they are the same as the stencils' forward/backward differences.
+        let (nx, ny) = (self.geometry.nx, self.geometry.ny);
+        let (dx_inv, dy_inv) = (1.0 / self.geometry.delta_x(), 1.0 / self.geometry.delta_y());
+        // damping profiles of the absorbing layer (sigma_x depends on i only, sigma_y on j only)
+        let profile = |n: usize| -> Vec<f64> {
+            let w = self.geometry.nboundary;
+            (0..n).map(|k| if k < w || k >= n - w { (1.0 - k.min(n - k - 1) as f64 / w as f64) * PML_MAX_SIGMA } else { 0.0 }).collect()
+        };
+        let (sig_x, sig_y) = (profile(nx), profile(ny));
+        let ex = elec_x.as_slice_mut().unwrap();
+        let ey = elec_y.as_slice_mut().unwrap();
+        let bz = mag_z.as_slice_mut().unwrap();
+        let ax = avg_x.as_slice_mut().unwrap();
+        let ay = avg_y.as_slice_mut().unwrap();
+        let jx = current_x.as_slice().unwrap();
+        let jy = current_y.as_slice().unwrap();
 
-            // dB_z/dt = -dE_x/dy + dE_y/dx
-            mag_z[[i,j]] += (d_elec_x_dy - d_elec_y_dx) * delta_t;
-            
-            // Absorbing layer: damp B (static B is zero here: charges only ever move transiently)
-            if sigma_x > 0.0 || sigma_y > 0.0 {
-                mag_z[[i,j]] *= (-(sigma_x + sigma_y) * PML_MAX_SIGMA * delta_t).exp();
+        // Evolve Bz first, to get it from half a tick behind to half a tick ahead of E:
+        // dB_z/dt = dE_x/dy - dE_y/dx (forward differences), then damp B in the absorbing layer
+        // (static B is zero here: charges only ever move transiently)
+        for i in 0..nx {
+            let ip = if i + 1 < nx { i + 1 } else { 0 };
+            for j in 0..ny {
+                let jp = if j + 1 < ny { j + 1 } else { 0 };
+                let k = i * ny + j;
+                bz[k] += ((ex[i * ny + jp] - ex[k]) * dy_inv - (ey[ip * ny + j] - ey[k]) * dx_inv) * delta_t;
+                let sigma = sig_x[i] + sig_y[j];
+                if sigma > 0.0 { bz[k] *= 1.0 - sigma * delta_t; }
             }
         }
 
-        // Now the B field is half a tick ahead, so update the E field a tick to get ahead again
-        for (i, j, sigma_x, sigma_y) in pml::pml_iterator_from_geometry(&self.geometry) {
-            let d_magz_dy = self.stencils.evaluate(&mag_z, i, j, &stencil::StencilType::GradY, &stencil::DifferenceType::Backward);
-            let d_magz_dx = self.stencils.evaluate(&mag_z, i, j, &stencil::StencilType::GradX, &stencil::DifferenceType::Backward);
-            elec_x[[i,j]] += (d_magz_dy - current_x[[i,j]]) * delta_t;
-            elec_y[[i,j]] += (-d_magz_dx - current_y[[i,j]]) * delta_t;
-            
-            // Absorbing layer: damp the deviation of E from its running time-average, so that waves are
-            // absorbed but static fields are untouched (damping E itself drains the Coulomb field of the
-            // charges through the boundary)
-            if sigma_x > 0.0 || sigma_y > 0.0 {
-                let w = delta_t / PML_AVERAGE_TIME;
-                avg_x[[i,j]] += (elec_x[[i,j]] - avg_x[[i,j]]) * w;
-                avg_y[[i,j]] += (elec_y[[i,j]] - avg_y[[i,j]]) * w;
-                elec_x[[i,j]] = avg_x[[i,j]] + (elec_x[[i,j]] - avg_x[[i,j]]) * (-sigma_y * PML_MAX_SIGMA * delta_t).exp();
-                elec_y[[i,j]] = avg_y[[i,j]] + (elec_y[[i,j]] - avg_y[[i,j]]) * (-sigma_x * PML_MAX_SIGMA * delta_t).exp();
+        // Then E a whole tick (backward differences of B), and in the absorbing layer damp the
+        // deviation of E from its running time-average, so that waves are absorbed but static fields
+        // are untouched (damping E itself drains the Coulomb field of the charges through the boundary)
+        let w_avg = delta_t / PML_AVERAGE_TIME;
+        let mut damped: f64 = 0.0;
+        for i in 0..nx {
+            let im = if i > 0 { i - 1 } else { nx - 1 };
+            for j in 0..ny {
+                let jm = if j > 0 { j - 1 } else { ny - 1 };
+                let k = i * ny + j;
+                ex[k] += ((bz[k] - bz[i * ny + jm]) * dy_inv - jx[k]) * delta_t;
+                ey[k] += (-(bz[k] - bz[im * ny + j]) * dx_inv - jy[k]) * delta_t;
+                let (sx, sy) = (sig_x[i], sig_y[j]);
+                if sx > 0.0 || sy > 0.0 {
+                    ax[k] += (ex[k] - ax[k]) * w_avg;
+                    ay[k] += (ey[k] - ay[k]) * w_avg;
+                    let (ddx, ddy) = ((ex[k] - ax[k]) * sy * delta_t, (ey[k] - ay[k]) * sx * delta_t);
+                    ex[k] -= ddx;
+                    ey[k] -= ddy;
+                    damped = damped.max(ddx.abs()).max(ddy.abs());
+                }
             }
         }
 
+        // Only damping that changed E can have violated Gauss's law. (Damping rates are at most
+        // PML_MAX_SIGMA * delta_t ~ 0.2 per tick, so the explicit update above is stable.)
+        if damped > 0.0 { self.divergence_dirty = true; }
         self.ticks_since_divergence_cleaning += 1;
         if self.ticks_since_divergence_cleaning >= DIVERGENCE_CLEANING_TICKS {
-            self.clean_divergence();
+            if self.divergence_dirty { self.clean_divergence(); }
+            self.ticks_since_divergence_cleaning = 0;
         }
     }
 
@@ -397,6 +431,7 @@ impl FieldConfiguration {
     /// only the damping in the absorbing layer violates it.
     pub fn clean_divergence(&mut self) {
         self.ticks_since_divergence_cleaning = 0;
+        self.divergence_dirty = false;
         self.make_cic_grid();
         let elec_x = self.elec_x.as_ref().unwrap();
         let elec_y = self.elec_y.as_ref().unwrap();

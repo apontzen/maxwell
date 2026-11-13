@@ -25,11 +25,18 @@ use rustfft::{Fft, FftPlanner};
 use crate::geometry::Geometry;
 
 /// Regularisation length of the subtracted point charges, in cells, and the distance (in units of
-/// it) beyond which the regularisation is negligible (exp(-REG_FAR^2 / 2) ~ 1e-8)
+/// it) beyond which the regularisation is negligible
 const REG_CELLS: f64 = 1.0;
-const REG_FAR: f64 = 6.0;
+const REG_FAR: f64 = 4.5;   // exp(-REG_FAR^2 / 2) ~ 4e-5
+/// Within this distance (in units of the regularisation length) of a charge a segment's d theta
+/// is integrated directly; beyond, the exact d theta is corrected (a segment is at most one length long)
+const REG_NEAR: f64 = 2.0;
 
 /// Gauss-Legendre nodes and weights on [-1, 1]
+const GAUSS_LEGENDRE_4: [(f64, f64); 4] = [
+    (-0.8611363115940526, 0.3478548451374538), (-0.3399810435848563, 0.6521451548625461),
+    (0.3399810435848563, 0.6521451548625461), (0.8611363115940526, 0.3478548451374538),
+];
 const GAUSS_LEGENDRE_8: [(f64, f64); 8] = [
     (-0.9602898564975363, 0.1012285362903763), (-0.7966664774136267, 0.2223810344533745),
     (-0.5255324099163290, 0.3137066458778873), (-0.1834346424956498, 0.3626837833783620),
@@ -159,6 +166,7 @@ pub(crate) fn residuals(geometry: &Geometry, elec_x: &Array2<f64>, elec_y: &Arra
     // continuous in the charge's position and equal to the point charge's beyond REG_FAR * s.
     let s_reg = REG_CELLS * dx.max(dy);
     let far2 = (REG_FAR * s_reg).powi(2);
+    // near a charge: integrate the regularised d theta directly (16-point Gauss-Legendre)
     let regularised = |k: usize, x0: f64, y0: f64, x1: f64, y1: f64| -> f64 {
         let (ex, ey) = (x1 - x0, y1 - y0);
         let mut total = 0.0;
@@ -174,6 +182,20 @@ pub(crate) fn residuals(geometry: &Geometry, elec_x: &Array2<f64>, elec_y: &Arra
         }
         total
     };
+    // further away the segment cannot pass close to the charge: the exact (wrapped) d theta minus the
+    // small, smooth correction integral of exp(-r^2 / 2s^2) d theta (4-point Gauss-Legendre)
+    let correction = |k: usize, x0: f64, y0: f64, x1: f64, y1: f64| -> f64 {
+        let (ex, ey) = (x1 - x0, y1 - y0);
+        let mut total = 0.0;
+        for (node, weight) in GAUSS_LEGENDRE_4.iter() {
+            let t = 0.5 * (node + 1.0);
+            let (rx, ry) = (x0 + t * ex - xs[k], y0 + t * ey - ys[k]);
+            let r2 = rx * rx + ry * ry;
+            total += 0.5 * weight * (-r2 / (2.0 * s_reg * s_reg)).exp() / r2 * (rx * ey - ry * ex);
+        }
+        total
+    };
+    let near2 = (REG_NEAR * s_reg).powi(2);
     let sing = |p0: usize, p1: usize| -> f64 {
         let (a0, b0, a1, b1) = (p0 / m, p0 % m, p1 / m, p1 % m);
         let (x0, y0, x1, y1) = (a0 as f64 * dx, b0 as f64 * dy, a1 as f64 * dx, b1 as f64 * dy);
@@ -181,7 +203,13 @@ pub(crate) fn residuals(geometry: &Geometry, elec_x: &Array2<f64>, elec_y: &Arra
         let mut s = 0.0;
         for k in 0..nq {
             let d2 = (xm - xs[k]).powi(2) + (ym - ys[k]).powi(2);
-            let dtheta = if d2 > far2 { wrap(theta[k * m * m + p1] - theta[k * m * m + p0]) } else { regularised(k, x0, y0, x1, y1) };
+            let dtheta = if d2 > far2 {
+                wrap(theta[k * m * m + p1] - theta[k * m * m + p0])
+            } else if d2 > near2 {
+                wrap(theta[k * m * m + p1] - theta[k * m * m + p0]) - correction(k, x0, y0, x1, y1)
+            } else {
+                regularised(k, x0, y0, x1, y1)
+            };
             s += qs[k] * dtheta;
         }
         s * inv_two_pi
