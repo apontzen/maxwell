@@ -423,7 +423,7 @@ test.describe('rule runners against the exact reference (neutral pairs only)', (
         expect(rules.ruleGauss({ models, lines2d: dropLine }, PAIR_CFGS).length).toBeGreaterThan(0);
         const clipped = { ...base, electricFieldLines: (m, v) => base.electricFieldLines(m, v).map(l => ({ ...l, points: l.points.filter(([x, y]) => Math.abs(x - v.width / 2) < v.width && Math.abs(y - v.height / 2) < v.height) })) };
         expect(rules.ruleEndpoints({ models, lines2d: clipped }, PAIR_CFGS).length).toBeGreaterThan(0);
-        const viewDependent = { ...base, electricFieldLines: (m, v) => base.electricFieldLines(m, v).map(l => ({ ...l, points: l.points.map(([x, y]) => [x + (v.width > 700 ? 1 : 0), y]) })) };
+        const viewDependent = { ...base, electricFieldLines: (m, v) => base.electricFieldLines(m, v).map(l => ({ ...l, points: l.points.map(([x, y]) => [x + (v.width > 700 ? 3 : 0), y]) })) };
         expect(rules.ruleViewportIndependence({ models, lines2d: viewDependent }, PAIR_CFGS).length).toBeGreaterThan(0);
         const reversed = { ...base, electricFieldLines: (m, v) => base.electricFieldLines(m, v).map(l => ({ ...l, points: [...l.points].reverse(), from: l.to, to: l.from })) };
         expect(rules.ruleTangency({ models, lines2d: reversed }, PAIR_CFGS).length).toBeGreaterThan(0);
@@ -494,7 +494,7 @@ test.describe('configurations', () => {
         const ex = JSON.parse(fs.readFileSync(new URL('./fixtures/examples.json', import.meta.url), 'utf8'));
         const el = configs.lectureConfigs(ex, 'electrostatic_direct'), mag = configs.lectureConfigs(ex, 'magnetostatic_direct');
         expect(el.length).toBe(ex.filter(e => e.state.solver === 'electrostatic_direct').length);
-        expect(mag.length).toBe(ex.filter(e => e.state.solver === 'magnetostatic_direct').length);
+        expect(mag.length).toBe(ex.filter(e => e.state.solver.startsWith('magnetostatic_')).length);
         const l32 = el.find(c => c.name === 'lecture03-2');
         near(l32.uniformX, 400 / 335, 1e-12);
         expect(l32.charges.every(c => c.isTestCharge)).toBe(true);

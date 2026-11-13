@@ -26,7 +26,11 @@ export function rng(seed) {
  * y to the height); uniformElecX/Y are stored multiplied by the canvas height.
  */
 export function lectureConfigs(examples, solver) {
-    return examples.filter(e => e.state.solver === solver).map(e => ({
+    // the magnetic examples use 'magnetostatic_direct' (deprecated alias of
+    // 'magnetostatic_moving_charge') or 'magnetostatic_wire'; all are drawn as wires in field-line mode
+    const solvers = solver === 'magnetostatic_direct'
+        ? ['magnetostatic_direct', 'magnetostatic_moving_charge', 'magnetostatic_wire'] : [solver];
+    return examples.filter(e => solvers.includes(e.state.solver)).map(e => ({
         name: e.id,
         charges: e.state.charges.map(c => ({
             x: c.x * CANVAS_W, y: c.y * CANVAS_H, charge: c.charge, isTestCharge: !!c.isTestCharge,

@@ -75,10 +75,11 @@ export { LINES_PER_UNIT_CHARGE };
 const LPU = LINES_PER_UNIT_CHARGE;
 const TWO_PI = 2 * Math.PI;
 
-// Contour spacing in units of model.K (see contourStep). A compromise: on a 668x335 canvas it
-// gives 8 equipotentials around each charge of lecture 4 (+2,+2; 13 for +2,-2) and 3 closed
-// field lines around each wire of the lecture 12 magnetic dipole (+-1, 80 px apart).
-const CONTOUR_STEP_OVER_K = 0.5;
+// Contour spacing in units of model.K (see contourStep). pi/4 gives lecture 4's equipotentials
+// (+-2 charges) about the same density as the old 3D drawing: 5 around each charge of the +2,+2
+// pair on a 668x335 canvas. Wires of +-1 (e.g. the lecture 12 magnetic dipole) then get only 2
+// closed field lines each; such examples should use currents of +-2 (issue #3, stage 4).
+const CONTOUR_STEP_OVER_K = Math.PI / 4;
 // Contours (magnetic field lines, equipotentials) stop at this distance from a source: the
 // radius of the drawn charge / current circle (draw.js chargeSize)
 export const SOURCE_DISK_RADIUS = 10;

@@ -12,7 +12,7 @@
 //   - that clicks, double clicks and touch drags behave as expected.
 
 import {
-    test, expect, examples, expectedCheckboxes, isDynamic, hasGaussianSurface, dipolePairs,
+    test, expect, examples, expectedCheckboxes, isDynamic, isMagneticSolver, hasGaussianSurface, dipolePairs,
     grabbableCharges, sampleCharges, dragTarget, gotoExample, waitForRender, embed, canvas,
     canvasPng, canvasPixels, countDifferentPixels, colourAt, classifyColour, toPage, mouseDrag,
     mouseDrawPath, loopAround, touchDrag, advance, checkbox, installPausedClock, DYNAMIC_RUNTIME_MS,
@@ -27,7 +27,7 @@ function expectedChargeColour(charge) {
 }
 
 function isElectric(example) {
-    return example.state.solver !== 'magnetostatic_direct';
+    return !isMagneticSolver(example.state.solver);
 }
 
 for (const example of examples) {

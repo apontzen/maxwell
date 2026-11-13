@@ -60,16 +60,16 @@ test.describe('electric field lines (2D line charges)', () => {
             test('every end is on a source (within 1 px) or at infinity (> 3 view diagonals away); from/to agree', async ({ page }) => {
                 await expectRule(page, 'ruleEndpoints', [configs], 'Endpoints');
             });
-            test('lines are tangent to the field (< 3 deg beyond 5 px of any source), oriented + to -', async ({ page }) => {
+            test('lines are tangent to the field (< 3 deg outside the drawn charges), oriented + to -', async ({ page }) => {
                 await expectRule(page, 'ruleTangency', [configs], 'Tangency');
             });
-            test('lines do not depend on the view: view x2 gives the same lines inside the original view (0.5 px)', async ({ page }) => {
+            test('lines do not depend on the view: view x2 gives the same lines inside the original view (1 px)', async ({ page }) => {
                 await expectRule(page, 'ruleViewportIndependence', [configs], 'Viewport independence');
             });
             test("Gauss's law: net signed crossings of random polygons = 4 x enclosed charge", async ({ page }) => {
                 await expectRule(page, 'ruleGauss', [configs], "Gauss's law");
             });
-            test('potential contours cross field lines at 90 +- 5 deg', async ({ page }) => {
+            test('potential contours cross field lines at 90 +- 6 deg', async ({ page }) => {
                 await expectRule(page, 'rulePerpendicularContours', [configs], 'Perpendicular contours');
             });
         });

@@ -4,7 +4,9 @@
 import { test, expect } from './helpers.js';
 
 test.beforeEach(async ({ page }) => {
-    await page.goto('/tests/harness.html');
+    await page.goto('/tests/blank.html');
+    // solvers.js imports the WASM module, which must be initialised before use
+    await page.evaluate(async () => { const wasm = await import('/maxwell/out/maxwell.js'); await wasm.default(); });
 });
 
 test('effective solver and aliases', async ({ page }) => {
@@ -73,7 +75,7 @@ test('2D render models take field, forces and test-charge forces from one model'
 test('2D model normalisation matches the 3D field at a quarter of the canvas width (D3)', async ({ page }) => {
     const r = await page.evaluate(async () => {
         const s = await import('/solvers.js');
-        const { FieldConfiguration } = await import('/maxwell/out/maxwell.js');
+        const { FieldConfiguration } = await import('/maxwell/out/maxwell.js'); // initialised in beforeEach
         const W = 668, H = 335;
         const charges = [{ x: 100, y: 150, charge: 1, id: 0 }];
         const field = new FieldConfiguration(W, H, 64, 64);

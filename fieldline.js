@@ -67,17 +67,20 @@ function arcLengthMidpoint(points) {
     return points[points.length - 1];
 }
 
-function drawArrowAt(ctx, model, p, color) {
-    const { u, v } = model.fieldAt(p[0], p[1]);
-    drawDirectionArrow(p[0], p[1], u, v, ctx, color);
+function pathLength(points) {
+    let total = 0;
+    for (let i = 1; i < points.length; i++)
+        total += Math.hypot(points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1]);
+    return total;
 }
 
 /**
- * Direction arrows for a polyline: one in the middle of each visible stretch. A closed loop
- * that is entirely visible gets two, at its leftmost and rightmost points, which move
- * continuously as charges are dragged.
+ * Candidate direction-arrow positions for a polyline: the middle of each visible stretch. A
+ * closed loop that is entirely visible gets two, at its leftmost and rightmost points, which
+ * move continuously as charges are dragged. Each candidate is weighted by the length of the
+ * stretch it belongs to.
  */
-function drawArrowsOnLine(ctx, model, points, closed, rect, color) {
+function arrowCandidates(points, closed, rect) {
     const runs = visibleRuns(points, rect);
     if (closed && runs.length === 1 && runs[0].length === points.length) {
         let left = points[0], right = points[0];
@@ -85,11 +88,29 @@ function drawArrowsOnLine(ctx, model, points, closed, rect, color) {
             if (p[0] < left[0]) left = p;
             if (p[0] > right[0]) right = p;
         }
-        drawArrowAt(ctx, model, left, color);
-        drawArrowAt(ctx, model, right, color);
-        return;
+        const weight = pathLength(points);
+        return [{ p: left, weight }, { p: right, weight }];
     }
-    for (const run of runs) drawArrowAt(ctx, model, arcLengthMidpoint(run), color);
+    return runs.map(run => ({ p: arcLengthMidpoint(run), weight: pathLength(run) }));
+}
+
+const MIN_ARROW_SEPARATION = 18; // px
+const MIN_ARROW_DISTANCE_FROM_SOURCE = 16; // px (the drawn charges have radius 10)
+
+/**
+ * Draw arrows at the candidate positions, longest lines first, skipping any that would crowd an
+ * arrow already placed or sit on top of a charge (e.g. on the many small loops around a wire).
+ */
+function drawArrows(ctx, model, candidates, color) {
+    candidates.sort((a, b) => b.weight - a.weight);
+    const placed = [];
+    for (const { p } of candidates) {
+        if (model.sources.some(s => Math.hypot(p[0] - s.x, p[1] - s.y) < MIN_ARROW_DISTANCE_FROM_SOURCE)) continue;
+        if (placed.some(q => Math.hypot(p[0] - q[0], p[1] - q[1]) < MIN_ARROW_SEPARATION)) continue;
+        placed.push(p);
+        const { u, v } = model.fieldAt(p[0], p[1]);
+        drawDirectionArrow(p[0], p[1], u, v, ctx, color);
+    }
 }
 
 function crossings(ctx, model, points, closed, gaussianSurfacePoints) {
@@ -103,29 +124,33 @@ function crossings(ctx, model, points, closed, gaussianSurfacePoints) {
 export function drawElectricFieldLines2D(ctx, model, rect, gaussianSurfacePoints) {
     const color = gaussianSurfacePoints.length > 0 ? 'grey' : 'black';
     const lines = electricFieldLines(model, { width: rect.width, height: rect.height });
+    const candidates = [];
     for (const line of lines) {
         ctx.save();
         ctx.strokeStyle = color;
         ctx.lineWidth = 1.0;
         strokePolyline(ctx, line.points);
         ctx.restore();
-        drawArrowsOnLine(ctx, model, line.points, false, rect, color);
-        crossings(ctx, model, line.points, false, gaussianSurfacePoints);
+        candidates.push(...arrowCandidates(line.points, false, rect));
     }
+    drawArrows(ctx, model, candidates, color);
+    for (const line of lines) crossings(ctx, model, line.points, false, gaussianSurfacePoints);
 }
 
 /** Magnetic field lines (contours of A_z) of a 2D straight-wire model. */
 export function drawMagneticFieldLines2D(ctx, model, rect, gaussianSurfacePoints) {
     const lines = magneticFieldLines(model, { width: rect.width, height: rect.height });
+    const candidates = [];
     for (const line of lines) {
         ctx.save();
         ctx.strokeStyle = 'black';
         ctx.lineWidth = 1.0;
         strokePolyline(ctx, line.points, line.closed);
         ctx.restore();
-        drawArrowsOnLine(ctx, model, line.points, line.closed, rect, 'black');
-        crossings(ctx, model, line.points, line.closed, gaussianSurfacePoints);
+        candidates.push(...arrowCandidates(line.points, line.closed, rect));
     }
+    drawArrows(ctx, model, candidates, 'black');
+    for (const line of lines) crossings(ctx, model, line.points, line.closed, gaussianSurfacePoints);
 }
 
 /** Equipotentials of a 2D line-charge model: positive red, negative blue, zero grey. */

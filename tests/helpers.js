@@ -60,7 +60,7 @@ export async function installPausedClock(page) {
 export function expectedCheckboxes(example) {
     const a = example.attributes;
     const s = example.state;
-    const magnetic = s.solver === 'magnetostatic_direct';
+    const magnetic = isMagneticSolver(s.solver);
     const boxes = [];
     // Order matches the order in which ui.js adds them to the DOM
     if (a['fieldlines-checkbox'])
@@ -72,6 +72,13 @@ export function expectedCheckboxes(example) {
     if (a['dipole-checkbox'])
         boxes.push({ key: 'dipole', label: magnetic ? 'Rigid current loop' : 'Rigid dipole', checked: !!s.dipoleMode });
     return boxes;
+}
+
+/** Solver names that draw currents rather than charges (including the deprecated alias). */
+export const MAGNETIC_SOLVERS = ['magnetostatic_direct', 'magnetostatic_moving_charge', 'magnetostatic_wire'];
+
+export function isMagneticSolver(solver) {
+    return MAGNETIC_SOLVERS.includes(solver);
 }
 
 export function isDynamic(example) {

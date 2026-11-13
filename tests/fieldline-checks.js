@@ -181,7 +181,7 @@ export function matchAngleSets(A, B, offset = 0) {
  * `lines` must be {points, from, to}; for lines without from/to (magnetic) pass labelled=false
  * and then open ends must be far away and closed lines must be marked closed.
  */
-export function checkEndpoints(lines, sources, view, { tol = 1, farFactor = 3, labelled = true } = {}) {
+export function checkEndpoints(lines, sources, view, { tol = 1, farFactor = 3, labelled = true, diskRadius = null } = {}) {
     const problems = [];
     const cx = view.width / 2, cy = view.height / 2;
     const far = farFactor * Math.hypot(view.width, view.height);
@@ -204,6 +204,8 @@ export function checkEndpoints(lines, sources, view, { tol = 1, farFactor = 3, l
             const where = `${name} ${end} (${p[0].toFixed(1)}, ${p[1].toFixed(1)})`;
             if (!labelled) {
                 if (line.closed) continue;
+                // contours may be clipped where they enter the drawn disk of a source
+                if (diskRadius !== null && Math.abs(nearestDist - diskRadius) <= tol) continue;
                 if (!farAway) problems.push(`${where} is an open end but is not more than ${farFactor} view diagonals from the view centre`);
                 continue;
             }
