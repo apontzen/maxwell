@@ -28,6 +28,12 @@
 //     which may not touch any charge. Each physical line appears exactly once.
 //   - A line ending on a charge ends exactly at the charge's position.
 //
+//   Grid models (gridfield.js, model.kind === 'electrostatic_grid'; issue #3 stage 2b): the same,
+//   except that the world ends at the edge of the canvas (model.region), so `infinity` means a
+//   point on that edge, or a point where the line fades out in a region with no field (a "dead
+//   zone", e.g. where radiation has not arrived and the static fields cancel). A time-dependent
+//   field can also have closed field lines, returned with from = to = 'loop' and closed = true.
+//
 // magneticFieldLines(model, view) -> Array<{ points: Array<[x, y]>, closed: boolean, level: number }>
 //   - model.kind === 'magnetostatic_wire'. Contours of model.potentialAt (= A_z) at levels
 //     k * contourStep(model) (D4), covering at least the view; closed loops have closed = true
@@ -63,11 +69,14 @@
 //   traced through the disks around sources but the parts inside are dropped.
 //   Coincident sources are traced as one source of their total charge (with zero-length lines
 //   between the members' remaining line ends).
+//   Grid models: psi has a single-valued part interpolated from the grid; stagnation points are
+//   found on the grid; lines are also seeded on the edge of the world (lines that touch no charge)
+//   and along a ray from each extremum of psi to the edge (closed lines: each encloses one).
 
 
 import { LINES_PER_UNIT_CHARGE } from './fieldmodels.js';
 import {
-    buildSystem, PsiEvaluator, PotentialEvaluator, stagnationPoints, softenStagnationPoints,
+    buildSystem, PsiEvaluator, PotentialEvaluator, stagnationPoints, softenStagnationPoints, gridStagnationPoints, inDeadZone,
     prepareSnap, traceContour, sampleStep, bracketRoot, seedBox, boxPoint, SegmentHash,
 } from './levelsets2d.js';
 
@@ -140,7 +149,7 @@ function chargeSlots(T, ev, i) {
             th[j] = j === i ? alpha : thc[j] + wrap(Math.atan2(y - T.ys[j], x - T.xs[j]) - thc[j]);
             s += T.qs[j] * th[j];
         }
-        return { x, y, th, psi: s / TWO_PI + (T.ux * (y - T.myc) - T.uy * (x - T.mxc)) * c };
+        return { x, y, th, psi: s / TWO_PI + (T.ux * (y - T.myc) - T.uy * (x - T.mxc)) * c + ev.restAt(x, y) };
     };
     const a = state(-Math.PI).psi;
     const sgn = q > 0 ? 1 : -1;
@@ -149,13 +158,11 @@ function chargeSlots(T, ev, i) {
     for (let m = 0; m < nl; m++) {
         const level = (k0 + sgn * m) / LPU;
         // psi is monotonic in alpha (increasing for q > 0) on [-pi - 0.1, pi + 0.1]
-        let lo = -Math.PI - 0.1, hi = Math.PI + 0.1;
-        for (let it = 0; it < 60; it++) {
-            const mid = 0.5 * (lo + hi);
-            if ((state(mid).psi - level) * sgn < 0) lo = mid; else hi = mid;
-        }
-        const st = state(0.5 * (lo + hi));
-        list.push({ angle: wrap(0.5 * (lo + hi)), x: st.x, y: st.y, th: st.th, level, line: -1 });
+        const lo = -Math.PI - 0.1, hi = Math.PI + 0.1;
+        const f = (t) => state(t).psi - level;
+        const alpha = bracketRoot(f, lo, hi, f(lo), f(hi));
+        const st = state(alpha);
+        list.push({ angle: wrap(alpha), x: st.x, y: st.y, th: st.th, level, line: -1 });
     }
     return { rho, list };
 }
@@ -198,8 +205,8 @@ export function electricFieldLines(model, view) {
         return -1;
     };
     for (const l of lines) {
-        if (l.from !== 'infinity') l.from = take(keep[l.from], 1);
-        if (l.to !== 'infinity') l.to = take(keep[l.to], -1);
+        if (typeof l.from === 'number') l.from = take(keep[l.from], 1);
+        if (typeof l.to === 'number') l.to = take(keep[l.to], -1);
     }
     for (let g = 0; g < groups.length; g++) {
         for (;;) {
@@ -213,14 +220,25 @@ export function electricFieldLines(model, view) {
     return lines;
 }
 
+const MIN_EDGE_LINE = 4; // px
+
+function pathLength(pts) {
+    let s = 0;
+    for (let k = 1; k < pts.length; k++) s += Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]);
+    return s;
+}
+
+// A line of a grid model may also fade out in a dead zone (no field); it is drawn as 'infinity'
+const openEnd = (end) => end === 'infinity' || end === 'faded';
+
 function electricLines(model, view) {
     const T = buildSystem(model, view);
     const diag = { conflicts: 0, maxsteps: 0, freeHitCharge: 0, seeds: 0 };
     Object.keys(diagnostics).forEach(k => delete diagnostics[k]);
     Object.assign(diagnostics, diag);
-    if (T.n === 0 && !T.hasUniform) return [];
-    T.crit = stagnationPoints(T);
+    if (T.n === 0 && !T.hasUniform && !T.region) return [];
     const ev = new PsiEvaluator(T);
+    T.crit = T.rest ? gridStagnationPoints(T, ev) : stagnationPoints(T);
     const snaps = [];
     for (const s of T.crit) {
         const v = LPU * ev.principal(s.x, s.y);
@@ -275,7 +293,7 @@ function electricLines(model, view) {
             slot.line = index;
             let to = 'infinity';
             if (res.end === 'capture') { arrive(pts, res.source, index); to = res.source; }
-            else if (res.end !== 'infinity') diag.maxsteps++;
+            else if (!openEnd(res.end)) diag.maxsteps++;
             lines.push({ points: pts, from: i, to, level: slot.level });
         }
     }
@@ -291,7 +309,7 @@ function electricLines(model, view) {
             slot.line = index;
             let from = 'infinity';
             if (res.end === 'capture') { arrive(pts, res.source, index); from = res.source; diag.conflicts++; }
-            else if (res.end !== 'infinity') diag.maxsteps++;
+            else if (!openEnd(res.end)) diag.maxsteps++;
             pts.reverse();
             lines.push({ points: pts, from, to: i, level: slot.level });
         }
@@ -299,13 +317,21 @@ function electricLines(model, view) {
 
     // lines of the uniform field that touch no charge: every one crossing the view crosses the
     // boundary of the (expanded) view, so seed on that boundary
-    if (T.hasUniform) {
-        const box = seedBox(T, SEED_MARGIN);
+    if (T.hasUniform || T.region) {
+        const box = T.region ? regionSeedBox(T) : seedBox(T, SEED_MARGIN);
         const hash = new SegmentHash(box);
         for (const l of lines) hash.insertPolyline(l.points, 0);
         const seeds = psiBoxSeeds(T, ev, box);
         diag.seeds = seeds.length;
+        // grid models: lines already traced end exactly where they cross the edge of the world
+        const ends = [];
+        if (T.region) for (const l of lines) {
+            if (l.from === 'infinity') ends.push(l.points[0]);
+            if (l.to === 'infinity') ends.push(l.points[l.points.length - 1]);
+        }
         for (const sd of seeds) {
+            if (inDeadZone(T, sd.x, sd.y)) continue;
+            if (ends.some(([ex, ey]) => Math.abs(ex - sd.x) + Math.abs(ey - sd.y) < 1e-4)) continue;
             if (hash.contains(sd.x, sd.y)) continue;
             ev.copyStateFrom(sd.th);
             const f = traceContour(T, ev, sd.x, sd.y, sd.level, 1, { capture: captureNeg, snaps });
@@ -313,21 +339,35 @@ function electricLines(model, view) {
             ev.copyStateFrom(sd.th);
             const b = traceContour(T, ev, sd.x, sd.y, sd.level, -1, { capture: capturePos, snaps });
             if (b.end === 'capture') { diag.freeHitCharge++; continue; }
-            if (f.end !== 'infinity' || b.end !== 'infinity') diag.maxsteps++;
+            if (!openEnd(f.end) || !openEnd(b.end)) diag.maxsteps++;
             const pts = b.pts.reverse().concat(f.pts.slice(1));
             hash.insertPolyline(pts, 0);
+            // grid models: a stub where a contour of a (nearly) dead zone grazes the edge
+            if (T.region && pathLength(pts) < MIN_EDGE_LINE) continue;
             lines.push({ points: pts, from: 'infinity', to: 'infinity', level: sd.level });
         }
+        if (T.region) closedLoops(T, ev, hash, captureNeg, snaps, lines);
     }
     Object.assign(diagnostics, diag, { stagnation: T.crit.length, snaps: snaps.length });
     return lines;
 }
 
+/** Grid models: the edge of the world, moved just inside it. */
+function regionSeedBox(T) {
+    const r = T.region;
+    return { x0: r.x0, y0: r.y0, x1: r.x1, y1: r.y1 };
+}
+
 /** Points on the box boundary where psi (unwrapped along the boundary) crosses a level k / LPU. */
 function psiBoxSeeds(T, ev, box) {
     const P = 2 * ((box.x1 - box.x0) + (box.y1 - box.y0));
+    return psiPathSeeds(T, ev, s => boxPoint(box, s), P);
+}
+
+/** Points on the path pointAt(s), 0 <= s <= P, where psi (unwrapped along it) crosses a level k / LPU. */
+function psiPathSeeds(T, ev, pointAt, P) {
     let s = 0;
-    let [x, y] = boxPoint(box, 0);
+    let [x, y] = pointAt(0);
     ev.resetPrincipal(x, y);
     let v = ev.val(x, y);
     const seeds = [];
@@ -336,15 +376,15 @@ function psiBoxSeeds(T, ev, box) {
         const xp = x, yp = y, vp = v;
         const sp = s;
         s = Math.min(P, s + sampleStep(T, x, y, Math.hypot(ev.gx, ev.gy), 1 / LPU));
-        [x, y] = boxPoint(box, s);
+        [x, y] = pointAt(s);
         v = ev.val(x, y);
         let ka = Math.floor(LPU * vp), kb = Math.floor(LPU * v);
         if (ka === kb) continue;
         const lo = Math.min(ka, kb) + 1, hi = Math.max(ka, kb);
         for (let m = lo; m <= hi; m++) {
             const level = m / LPU;
-            const f = (t) => { const [qx, qy] = boxPoint(box, t); return vp + ev.diff(qx, qy, xp, yp) - level; };
-            const [qx, qy] = boxPoint(box, bracketRoot(f, sp, s, vp - level, v - level));
+            const f = (t) => { const [qx, qy] = pointAt(t); return vp + ev.diff(qx, qy, xp, yp) - level; };
+            const [qx, qy] = pointAt(bracketRoot(f, sp, s, vp - level, v - level));
             const th = new Float64Array(T.n);
             for (let j = 0; j < T.n; j++)
                 th[j] = thPrev[j] + wrap(Math.atan2(qy - T.ys[j], qx - T.xs[j]) - Math.atan2(yp - T.ys[j], xp - T.xs[j]));
@@ -352,6 +392,31 @@ function psiBoxSeeds(T, ev, box) {
         }
     }
     return seeds;
+}
+
+/**
+ * Grid models: closed field lines (e.g. radiation). Each encloses an extremum of psi, so seed along
+ * a ray from every extremum to the edge of the world.
+ */
+function closedLoops(T, ev, hash, capture, snaps, lines) {
+    const reg = T.region;
+    for (const c of T.crit) {
+        if (!c.extremum || inDeadZone(T, c.x, c.y)) continue;
+        // the ray towards the nearest edge
+        const d = [[c.x - reg.x0, -1, 0], [reg.x1 - c.x, 1, 0], [c.y - reg.y0, 0, -1], [reg.y1 - c.y, 0, 1]]
+            .sort((p, q) => p[0] - q[0])[0];
+        const L = d[0] * (1 - 1e-9);
+        const r0 = 1e-3;
+        const seeds = psiPathSeeds(T, ev, s => [c.x + d[1] * (r0 + s), c.y + d[2] * (r0 + s)], L - r0);
+        for (const sd of seeds) {
+            if (inDeadZone(T, sd.x, sd.y) || hash.contains(sd.x, sd.y)) continue;
+            ev.copyStateFrom(sd.th);
+            const f = traceContour(T, ev, sd.x, sd.y, sd.level, 1, { capture, snaps, closeGate: true });
+            hash.insertPolyline(f.pts, 0);
+            if (f.end !== 'closed') continue;   // open lines are found from the charges and the edge
+            lines.push({ points: f.pts, from: 'loop', to: 'loop', level: sd.level, closed: true });
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------------------------

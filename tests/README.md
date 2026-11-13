@@ -106,8 +106,8 @@ back, and that the deprecated `magnetostatic_direct` name renders exactly as
 
 ### Field lines (2D)
 
-Field lines are always drawn for a 2D world (line charges / straight wires); see
-[issue #3](https://github.com/apontzen/maxwell/issues/3). Their geometry
+Field lines are always drawn for a 2D world (line charges / straight wires, or the 2D grid
+solvers); see [issue #3](https://github.com/apontzen/maxwell/issues/3). Their geometry
 (`fieldlines2d.js`) is tested directly, independently of the pictures:
 
 - `fieldline-checks.js` contains pure geometric checkers.
@@ -125,6 +125,16 @@ Field lines are always drawn for a 2D world (line charges / straight wires); see
   - net crossings of any closed loop equal 4 × the enclosed charge;
   - magnetic field lines are closed;
   - a time budget per frame.
+- `fieldlines-grid.spec.js` does the same for the grid solvers (`electrostatic_fourier`,
+  `dynamic`; `gridfield.js` on top of the stream function computed in `maxwell/src/streamfn.rs`):
+  4|q| line ends per charge, lines end on a charge, on the edge of the canvas (the grid world ends
+  there) or fade out where there is no field, tangency, Gauss's law, a time budget, and closed
+  field lines radiated by a shaken dipole. The lecture examples, random configurations and a net
+  charge are used for the Fourier solver; for the dynamic solver, lecture 14 before and after a
+  drag and lecture 16 after shaking a charge.
+- The Rust unit tests (`cargo test --lib` in `maxwell/`) check the stream function's least-squares
+  solver, and that it reproduces the grid's face fluxes exactly for pure radiation and closely
+  (outside the smeared charges) for a static field.
 - `solvers.spec.js` checks the solver registry (`solvers.js`): which model is used in
   each mode, the deprecated alias, and that forces and fields come from the same 2D model.
 

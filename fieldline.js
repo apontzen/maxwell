@@ -129,12 +129,12 @@ export function drawElectricFieldLines2D(ctx, model, rect, gaussianSurfacePoints
         ctx.save();
         ctx.strokeStyle = color;
         ctx.lineWidth = 1.0;
-        strokePolyline(ctx, line.points);
+        strokePolyline(ctx, line.points, !!line.closed);
         ctx.restore();
-        candidates.push(...arrowCandidates(line.points, false, rect));
+        candidates.push(...arrowCandidates(line.points, !!line.closed, rect));
     }
     drawArrows(ctx, model, candidates, color);
-    for (const line of lines) crossings(ctx, model, line.points, false, gaussianSurfacePoints);
+    for (const line of lines) crossings(ctx, model, line.points, !!line.closed, gaussianSurfacePoints);
 }
 
 /** Magnetic field lines (contours of A_z) of a 2D straight-wire model. */

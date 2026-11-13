@@ -35,8 +35,8 @@ const SOLVERS = ['electrostatic_direct', 'electrostatic_line_charge', 'electrost
 const CONTROLS_FOR_SOLVER = {
     electrostatic_direct: { potential: true, fieldlines: true, forces: true, perCharge: true },
     electrostatic_line_charge: { potential: true, fieldlines: true, forces: true, perCharge: true },
-    electrostatic_fourier: { potential: false, fieldlines: false, forces: false, perCharge: false },
-    dynamic: { potential: false, fieldlines: false, forces: false, perCharge: false },
+    electrostatic_fourier: { potential: false, fieldlines: true, forces: false, perCharge: false },
+    dynamic: { potential: false, fieldlines: true, forces: false, perCharge: false },
     magnetostatic_moving_charge: { potential: false, fieldlines: true, forces: true, perCharge: true },
     magnetostatic_wire: { potential: false, fieldlines: true, forces: true, perCharge: true },
 };

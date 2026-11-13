@@ -13,6 +13,7 @@ mod fourier;
 mod pml;
 mod geometry;
 mod contours;
+mod streamfn;
 
 const FIELD_SCALING: f64 = 20000.0;
 const SOFTEN: f64 = 5.0;
@@ -75,7 +76,8 @@ pub struct FieldConfiguration {
     stencils: stencil::Stencils,
     charge_normalization: f64,
     elec_uniform_x: f64,
-    elec_uniform_y: f64
+    elec_uniform_y: f64,
+    stream_solver: Option<streamfn::StreamFunctionSolver>,
 }
 
 pub fn evaluate_grid(field: &Array2<f64>, x: isize, y: isize) -> f64 {
@@ -149,7 +151,7 @@ impl FieldConfiguration {
         FieldConfiguration { charges: vec![], charges_at_last_tick: vec![], geometry, 
             cic_grid: None, elec_x: None, elec_y: None, mag_z: None, mag_z_integral: None, current_x: None, current_y: None,
             stencils: stencil::Stencils::new(geometry_clone), charge_normalization, 
-            elec_uniform_x: 0.0, elec_uniform_y: 0.0 }
+            elec_uniform_x: 0.0, elec_uniform_y: 0.0, stream_solver: None }
     }
 
     pub fn set_charges(&mut self, charges: JsValue) {
@@ -565,4 +567,95 @@ pub fn compute_electric_field_dynamic_to_buffer(field_configuration: &mut FieldC
     let Pair { u, v } = compute_electric_field_dynamic(field_configuration, x, y);
     buffer[0] = u;
     buffer[1] = v;
+}
+
+/// Single-valued part of the stream function of the grid electric field (see streamfn.rs), on the
+/// corners of the physical region: (n+1)^2 values, x-major, where n = grid_physical_cells.
+/// xs, ys, qs are the true positions and charges of the sources whose point-charge stream function
+/// is added analytically.
+#[wasm_bindgen]
+pub fn compute_grid_stream_function_rest(field_configuration: &mut FieldConfiguration, xs: &[f64], ys: &[f64], qs: &[f64]) -> Vec<f64> {
+    field_configuration.ensure_initialized();
+    let fc = field_configuration;
+    let solver = fc.stream_solver.get_or_insert_with(|| streamfn::StreamFunctionSolver::new(&fc.geometry));
+    let flux_per_unit_charge = fc.charge_normalization * fc.geometry.delta_x() * fc.geometry.delta_y();
+    streamfn::stream_function_rest(solver, &fc.geometry, fc.elec_x.as_ref().unwrap(), fc.elec_y.as_ref().unwrap(),
+                                   flux_per_unit_charge, xs, ys, qs)
+}
+
+/// Number of grid cells across the physical region (the same in x and y).
+#[wasm_bindgen]
+pub fn grid_physical_cells(field_configuration: &FieldConfiguration) -> usize {
+    field_configuration.geometry.nx - 2 * field_configuration.geometry.nboundary
+}
+
+#[cfg(test)]
+mod stream_function_tests {
+    use super::*;
+
+    /// max over segments of |D psi - r| (outside `exclude`), absolute (in units of charge) and relative to max |r|
+    fn misfit(fc: &FieldConfiguration, exclude: &dyn Fn(f64, f64) -> bool) -> (f64, f64) {
+        let xs: Vec<f64> = fc.charges.iter().map(|c| c.x).collect();
+        let ys: Vec<f64> = fc.charges.iter().map(|c| c.y).collect();
+        let qs: Vec<f64> = fc.charges.iter().map(|c| c.charge).collect();
+        let g = &fc.geometry;
+        let flux = fc.charge_normalization * g.delta_x() * g.delta_y();
+        let mut solver = streamfn::StreamFunctionSolver::new(g);
+        let ex = fc.elec_x.as_ref().unwrap();
+        let ey = fc.elec_y.as_ref().unwrap();
+        let psi = streamfn::stream_function_rest(&mut solver, g, ex, ey, flux, &xs, &ys, &qs);
+        let (rx, ry) = streamfn::residuals(g, ex, ey, flux, &xs, &ys, &qs);
+        let m = g.nx - 2 * g.nboundary + 1;
+        let (dx, dy) = (g.delta_x(), g.delta_y());
+        let (mut worst, mut scale): (f64, f64) = (0.0, 1e-300);
+        for a in 0..m {
+            for b in 0..m {
+                let p = a * m + b;
+                if a + 1 < m {
+                    scale = scale.max(rx[p].abs());
+                    if !exclude((a as f64 + 0.5) * dx, b as f64 * dy) { worst = worst.max((psi[p + m] - psi[p] - rx[p]).abs()); }
+                }
+                if b + 1 < m {
+                    scale = scale.max(ry[p].abs());
+                    if !exclude(a as f64 * dx, (b as f64 + 0.5) * dy) { worst = worst.max((psi[p + 1] - psi[p] - ry[p]).abs()); }
+                }
+            }
+        }
+        (worst, worst / scale)
+    }
+
+    #[test]
+    fn pure_radiation_is_reproduced_exactly() {
+        // a coincident +-2 pair, one of them shaken: when they coincide again rho = 0 everywhere,
+        // so the field is divergence-free and the stream function must reproduce every face flux
+        let mut fc = FieldConfiguration::new(668.0, 335.0, 111, 111);
+        let (x0, y0) = (334.0, 167.5);
+        fc.charges = vec![Charge::new(x0, y0, 2.0), Charge::new(x0, y0, -2.0)];
+        let step: f64 = 0.1 * 668.0 / 111.0;
+        for frame in 1..=60 {
+            let t = frame as f64 / 60.0;
+            let y = if frame == 60 { y0 } else { y0 + 25.0 * (2.0 * std::f64::consts::PI * t / 0.5).sin() };
+            fc.charges[0] = Charge::new(x0, y, 2.0);
+            let mut dt: f64 = 1000.0 / 60.0 / 5.0;
+            while dt > 0.0 { let s = step.min(dt); fc.tick(s); dt -= s; }
+        }
+        let (_, e) = misfit(&fc, &|_, _| false);
+        assert!(e < 1e-9, "relative misfit {}", e);
+    }
+
+    #[test]
+    fn static_field_is_reproduced_away_from_the_charges() {
+        // charges at cell centres (no snapping offset): outside the smearing kernels the misfit is
+        // only the difference between the (anisotropic) smeared charge and a point charge, a small
+        // fraction of the spacing of the field lines (1/4 in units of charge)
+        let mut fc = FieldConfiguration::new(668.0, 335.0, 111, 111);
+        let (dx, dy) = (fc.geometry.delta_x(), fc.geometry.delta_y());
+        let c1 = (30.5 * dx, 40.5 * dy);
+        let c2 = (55.5 * dx, 44.5 * dy);
+        fc.charges = vec![Charge::new(c1.0, c1.1, 3.0), Charge::new(c2.0, c2.1, -2.0)];
+        fc.initialize_on_constraints();
+        let near = |x: f64, y: f64| [c1, c2].iter().any(|c| ((x - c.0) / dx).abs() < 12.0 && ((y - c.1) / dy).abs() < 12.0);
+        let (abs, _) = misfit(&fc, &near);
+        assert!(4.0 * abs < 0.05, "misfit {} line spacings", 4.0 * abs);
+    }
 }

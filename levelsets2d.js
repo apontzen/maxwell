@@ -13,12 +13,15 @@
 // it is always at most a fraction of the distance to the nearest source or stagnation point, and
 // grows with distance from the view, so tracing out to "infinity" is cheap.
 //
+// Grid models (gridfield.js) add a single-valued, interpolated part to psi and end at the edge of
+// the canvas; their stagnation points are found on the grid (gridStagnationPoints).
+//
 // Stagnation points (zeros of the field) are found exactly as roots of a polynomial. A contour
 // that runs exactly into a stagnation point (as happens by symmetry, e.g. on the axis between two
 // equal charges) is snapped onto it and continued along the next outgoing branch, so that the
 // branches of the crossing are each drawn once and the result does not depend on rounding.
 
-import { SOFTEN } from './fieldmodels.js';
+import { SOFTEN, LINES_PER_UNIT_CHARGE } from './fieldmodels.js';
 
 const TWO_PI = 2 * Math.PI;
 
@@ -31,6 +34,10 @@ const NEAR_FRACTION = 0.1;            // step <= this fraction of the distance t
 const MAX_TURN_COS = Math.cos(0.15);  // max turning angle of the tangent over a half step
 const INFINITY_FACTOR = 10;           // "infinity" is this many view diagonals from the view centre
 export const MAX_STEPS = 30000;
+const MAX_CORRECTION = 0.2;          // max Newton correction as a fraction of the step
+const DEAD_LEVELS_PER_DIAGONAL = 0.01; // grid models: weaker fields are noise (see gridStagnationPoints)
+const DEAD_WINDOW = 2;                // corners
+const GRID_MAX_ARC = 6;              // grid models: max arc length of a trace, in region perimeters
 
 function wrap(a) {
     // wrap an angle difference into (-pi, pi]
@@ -61,6 +68,10 @@ export function buildSystem(model, view) {
         crit: [],          // stagnation points used to limit the step
         snaps: [],         // stagnation points lying exactly on a level traced in this run
         hasUniform: model.uniform.x !== 0 || model.uniform.y !== 0,
+        // grid models (gridfield.js): single-valued correction to psi, and the edge of the world
+        rest: model.psiRest || null,
+        region: model.region || null,
+        maxArc: model.region ? GRID_MAX_ARC * 2 * (model.region.x1 - model.region.x0 + model.region.y1 - model.region.y0) : Infinity,
     };
     return T;
 }
@@ -104,6 +115,7 @@ export class PsiEvaluator {
         ex = ex / TWO_PI + T.ux * this.c;
         ey = ey / TWO_PI + T.uy * this.c;
         this.gx = -ey; this.gy = ex;
+        if (T.rest) { T.rest.eval(x, y); this.gx += T.rest.gx; this.gy += T.rest.gy; }
     }
     val(x, y) {
         const T = this.T, xs = T.xs, ys = T.ys, qs = T.qs, th = this.th, pa = this.pa;
@@ -122,7 +134,15 @@ export class PsiEvaluator {
         ex = ex / TWO_PI + T.ux * this.c;
         ey = ey / TWO_PI + T.uy * this.c;
         this.gx = -ey; this.gy = ex;
-        return s / TWO_PI + (T.ux * (y - T.myc) - T.uy * (x - T.mxc)) * this.c;
+        let r = 0;
+        if (T.rest) { T.rest.eval(x, y); this.gx += T.rest.gx; this.gy += T.rest.gy; r = T.rest.val; }
+        return s / TWO_PI + (T.ux * (y - T.myc) - T.uy * (x - T.mxc)) * this.c + r;
+    }
+    /** The single-valued part of psi of a grid model (0 for the analytic models). */
+    restAt(x, y) {
+        if (!this.T.rest) return 0;
+        this.T.rest.eval(x, y);
+        return this.T.rest.val;
     }
     /** psi(x, y) - psi(x0, y0) along a short path (no branch cut crossed). */
     diff(x, y, x0, y0) {
@@ -130,13 +150,13 @@ export class PsiEvaluator {
         let s = 0;
         for (let i = 0; i < T.n; i++)
             s += T.qs[i] * wrap(Math.atan2(y - T.ys[i], x - T.xs[i]) - Math.atan2(y0 - T.ys[i], x0 - T.xs[i]));
-        return s / TWO_PI + (T.ux * (y - y0) - T.uy * (x - x0)) * this.c;
+        return s / TWO_PI + (T.ux * (y - y0) - T.uy * (x - x0)) * this.c + this.restAt(x, y) - this.restAt(x0, y0);
     }
     principal(x, y) {
         const T = this.T;
         let s = 0;
         for (let i = 0; i < T.n; i++) s += T.qs[i] * Math.atan2(y - T.ys[i], x - T.xs[i]);
-        return s / TWO_PI + (T.ux * (y - T.myc) - T.uy * (x - T.mxc)) * this.c;
+        return s / TWO_PI + (T.ux * (y - T.myc) - T.uy * (x - T.mxc)) * this.c + this.restAt(x, y);
     }
 }
 
@@ -330,6 +350,79 @@ export function stagnationPoints(T) {
     });
 }
 
+/**
+ * Stagnation points of a grid model's field (zeros of grad psi), as [{x, y, m: 1, extremum}], where
+ * extremum is true for a local extremum of psi (the centre of closed field lines) and false for a
+ * saddle. Found by sign changes of grad psi over the cells of the corner grid, then Newton.
+ */
+export function gridStagnationPoints(T, ev) {
+    const R = T.rest;
+    const m = R.m, dx = R.dx, dy = R.dy;
+    const gx = new Float64Array(m * m), gy = new Float64Array(m * m);
+    const nearSource = (x, y, r) => {
+        for (let i = 0; i < T.n; i++) if ((x - T.xs[i]) ** 2 + (y - T.ys[i]) ** 2 < r * r) return true;
+        return false;
+    };
+    for (let a = 0; a < m; a++) for (let b = 0; b < m; b++) {
+        ev.grad(a * dx, b * dy);
+        gx[a * m + b] = ev.gx; gy[a * m + b] = ev.gy;
+    }
+    // Dead zones: where |grad psi| is negligible within +-DEAD_WINDOW corners, psi is just noise
+    // (e.g. where radiation has not arrived yet and the static field cancels). Contours there are
+    // meaningless: nothing is seeded there and lines stop on entering one.
+    const gmin = DEAD_LEVELS_PER_DIAGONAL / (LINES_PER_UNIT_CHARGE * T.diag);
+    const live = new Uint8Array(m * m);
+    for (let p = 0; p < m * m; p++) live[p] = gx[p] * gx[p] + gy[p] * gy[p] >= gmin * gmin ? 1 : 0;
+    const dead = new Uint8Array(m * m);
+    let anyDead = false;
+    for (let a = 0; a < m; a++) for (let b = 0; b < m; b++) {
+        let ok = 0;
+        for (let i = Math.max(0, a - DEAD_WINDOW); i <= Math.min(m - 1, a + DEAD_WINDOW) && !ok; i++)
+            for (let j = Math.max(0, b - DEAD_WINDOW); j <= Math.min(m - 1, b + DEAD_WINDOW); j++)
+                if (live[i * m + j]) { ok = 1; break; }
+        if (!ok) { dead[a * m + b] = 1; anyDead = true; }
+    }
+    T.dead = anyDead ? dead : null;
+    const cellR = 2 * Math.hypot(dx, dy);
+    const out = [];
+    for (let a = 0; a + 1 < m; a++) for (let b = 0; b + 1 < m; b++) {
+        if (T.dead && (dead[a * m + b] || dead[(a + 1) * m + b] || dead[a * m + b + 1] || dead[(a + 1) * m + b + 1])) continue;
+        const k = [a * m + b, (a + 1) * m + b, a * m + b + 1, (a + 1) * m + b + 1];
+        let px = 0, nx = 0, py = 0, ny = 0;
+        for (const q of k) {
+            if (gx[q] > 0) px++; else nx++;
+            if (gy[q] > 0) py++; else ny++;
+        }
+        if (!px || !nx || !py || !ny) continue;
+        let x = (a + 0.5) * dx, y = (b + 0.5) * dy;
+        if (nearSource(x, y, cellR)) continue;
+        let ok = false, det = 0;
+        for (let it = 0; it < 20; it++) {
+            const h = 1e-3 * dx;
+            ev.grad(x, y); const fx = ev.gx, fy = ev.gy;
+            ev.grad(x + h, y); const axx = (ev.gx - fx) / h, ayx = (ev.gy - fy) / h;
+            ev.grad(x, y + h); const axy = (ev.gx - fx) / h, ayy = (ev.gy - fy) / h;
+            det = axx * ayy - axy * ayx;
+            if (det === 0) break;
+            const sx = (ayy * fx - axy * fy) / det, sy = (axx * fy - ayx * fx) / det;
+            x -= sx; y -= sy;
+            if (Math.hypot(sx, sy) < 1e-9 * dx) { ok = true; break; }
+        }
+        if (!ok || x < (a - 0.5) * dx || x > (a + 1.5) * dx || y < (b - 0.5) * dy || y > (b + 1.5) * dy) continue;
+        if (out.some(p => Math.hypot(p.x - x, p.y - y) < 0.5)) continue;
+        out.push({ x, y, m: 1, extremum: det > 0 });
+    }
+    return out;
+}
+
+/** Grid models: is (x, y) in a dead zone (see gridStagnationPoints)? */
+export function inDeadZone(T, x, y) {
+    if (!T.dead) return false;
+    const R = T.rest, m = R.m;
+    const a = Math.min(m - 1, Math.max(0, Math.round(x / R.dx))), b = Math.min(m - 1, Math.max(0, Math.round(y / R.dy)));
+    return T.dead[a * m + b] === 1;
+}
+
 /** Move unsoftened stagnation points to the zeros of the softened field (2D Newton). */
 export function softenStagnationPoints(T, pts) {
     return pts.map(p => {
@@ -458,6 +551,7 @@ export function traceContour(T, ev, x, y, L, dir, opts) {
     }
     let arc = 0;
     let leaving = null;
+    let usedExits = null;  // snap exits taken on this trace (a cycle through saddles must not repeat)
     let hPrev = 1.0; // the first step may be up to STEP_GROWTH px
     for (let step = 0; step < MAX_STEPS; step++) {
         let gn = Math.hypot(gx, gy);
@@ -471,30 +565,41 @@ export function traceContour(T, ev, x, y, L, dir, opts) {
         // where visible, while the segment would stray more than SAGITTA_TOL from the curve.
         // (Measured on the test workload, the estimate below is accurate: checking the actual
         // sagitta of every step rejected <0.1% of them, the worst being 0.11 px.)
-        let mx = 0, my = 0;
-        for (let tries = 0; tries < 30; tries++) {
-            ev.grad(x + 0.5 * h * tx, y + 0.5 * h * ty);
-            const mn = Math.hypot(ev.gx, ev.gy);
-            mx = dir * ev.gy / mn; my = -dir * ev.gx / mn;
-            if (h < 1e-9) break;
-            const dot = tx * mx + ty * my;
-            if (dot < MAX_TURN_COS) { h *= 0.5; continue; }
-            if (!visible) break;
-            // the tangent turns by ~2*turn over the step, so the segment's sagitta is ~h*turn/4
-            const turn = Math.acos(Math.min(1, dot));
-            const s4 = h * turn;
-            if (s4 <= 4 * SAGITTA_TOL) break;
-            h *= Math.max(0.25, 0.9 * Math.sqrt(4 * SAGITTA_TOL / s4)); // sagitta ~ h^2
-        }
-        // corrector: Newton projection back onto the level set
-        let xn = x + h * mx, yn = y + h * my;
-        for (let it = 0; it < 6; it++) {
-            const r = ev.val(xn, yn) - L;
-            const g2 = ev.gx * ev.gx + ev.gy * ev.gy;
-            if (!(g2 > 0)) break;
-            const c = r / g2;
-            xn -= c * ev.gx; yn -= c * ev.gy;
-            if (Math.abs(r) < 1e-7 * h * Math.sqrt(g2)) break;
+        let xn = x, yn = y;
+        for (let attempt = 0; ; attempt++) {
+            let mx = 0, my = 0;
+            for (let tries = 0; tries < 30; tries++) {
+                ev.grad(x + 0.5 * h * tx, y + 0.5 * h * ty);
+                const mn = Math.hypot(ev.gx, ev.gy);
+                mx = dir * ev.gy / mn; my = -dir * ev.gx / mn;
+                if (h < 1e-9) break;
+                const dot = tx * mx + ty * my;
+                if (dot < MAX_TURN_COS) { h *= 0.5; continue; }
+                if (!visible) break;
+                // the tangent turns by ~2*turn over the step, so the segment's sagitta is ~h*turn/4
+                const turn = Math.acos(Math.min(1, dot));
+                const s4 = h * turn;
+                if (s4 <= 4 * SAGITTA_TOL) break;
+                h *= Math.max(0.25, 0.9 * Math.sqrt(4 * SAGITTA_TOL / s4)); // sagitta ~ h^2
+            }
+            // corrector: Newton projection back onto the level set
+            xn = x + h * mx; yn = y + h * my;
+            for (let it = 0; it < 6; it++) {
+                const r = ev.val(xn, yn) - L;
+                const g2 = ev.gx * ev.gx + ev.gy * ev.gy;
+                if (!(g2 > 0)) break;
+                const c = r / g2;
+                xn -= c * ev.gx; yn -= c * ev.gy;
+                if (Math.abs(r) < 1e-7 * h * Math.sqrt(g2)) break;
+            }
+            // A large correction means the predictor reached a different contour of the same level
+            // (two contours pass close together near a stagnation point): retry with a shorter step.
+            const cx = xn - (x + h * mx), cy = yn - (y + h * my);
+            if (attempt < 10 && h > 1e-6 && cx * cx + cy * cy > MAX_CORRECTION * MAX_CORRECTION * h * h) {
+                h *= 0.5;
+                continue;
+            }
+            break;
         }
         hPrev = h;
         gx = ev.gx; gy = ev.gy;
@@ -502,6 +607,8 @@ export function traceContour(T, ev, x, y, L, dir, opts) {
         x = xn; y = yn;
         arc += h;
         pts.push([x, y]);
+        if (T.region && arc > T.maxArc) return { pts, end: 'maxsteps' };
+        if (T.dead && inDeadZone(T, x, y)) return { pts, end: 'faded' };
 
         if (capture) {
             const j = capture(x, y);
@@ -527,7 +634,15 @@ export function traceContour(T, ev, x, y, L, dir, opts) {
                 if (d < bestd) { bestd = d; best = b; }
             }
             if (best < 0) continue;
-            const exit = s.branches[(best + (dir > 0 ? 1 : nb - 1)) % nb];
+            // Normally turn one way; if that exit was already taken on this trace (possible when
+            // contours of a grid model run exactly through several saddles), turn the other way;
+            // if both were taken the contour is a cycle: stop.
+            let e = (best + (dir > 0 ? 1 : nb - 1)) % nb;
+            usedExits ??= new Set();
+            if (usedExits.has(s.branches[e])) e = (best + (dir > 0 ? nb - 1 : 1)) % nb;
+            if (usedExits.has(s.branches[e])) { pts[pts.length - 1] = [s.x, s.y]; return { pts, end: 'maxsteps' }; }
+            const exit = s.branches[e];
+            usedExits.add(exit);
             pts[pts.length - 1] = [s.x, s.y];
             ev.val(s.x, s.y);
             x = s.x + s.rs * Math.cos(exit.angle);
@@ -557,10 +672,54 @@ export function traceContour(T, ev, x, y, L, dir, opts) {
             }
         }
 
+        const reg = T.region;
+        if (reg && (x < reg.x0 || x > reg.x1 || y < reg.y0 || y > reg.y1)) {
+            const e = edgeCrossing(T, ev, L, px, py, x, y);
+            if (Math.hypot(e[0] - px, e[1] - py) < 1e-6) pts.pop(); else pts[pts.length - 1] = e;
+            return { pts, end: 'infinity' };
+        }
         const rx = x - T.cx, ry = y - T.cy;
         if (rx * rx + ry * ry > R2 && rx * gy * dir - ry * gx * dir > 0) return { pts, end: 'infinity' };
     }
     return { pts, end: 'maxsteps' };
+}
+
+/**
+ * Grid models: where the contour F = L leaves the world between (px, py) (inside) and (x, y)
+ * (outside, on the contour), exactly on the edge, so that it coincides with the seed found on the
+ * edge for the same contour. The evaluator state must be valid near (x, y).
+ */
+function edgeCrossing(T, ev, L, px, py, x, y) {
+    const reg = T.region;
+    let u = 1, side = -1;
+    const sides = [[reg.x0, px, x, 0], [reg.x1, px, x, 0], [reg.y0, py, y, 1], [reg.y1, py, y, 1]];
+    for (let k = 0; k < 4; k++) {
+        const [e, a, b] = sides[k];
+        if ((k % 2 === 0 && b < e) || (k % 2 === 1 && b > e)) {
+            const t = (e - a) / (b - a);
+            if (t < u) { u = t; side = k; }
+        }
+    }
+    u = Math.max(0, u);
+    let cx = px + u * (x - px), cy = py + u * (y - py);
+    if (side < 0) return [cx, cy];
+    // Newton along the edge. If the contour meets the edge almost tangentially the crossing is
+    // ill-conditioned: keep the chord's crossing (within 1 px of the curve) instead.
+    const alongX = sides[side][3] === 1;   // edge y = const: move in x
+    const lo = alongX ? reg.x0 : reg.y0, hi = alongX ? reg.x1 : reg.y1;
+    const c0 = alongX ? cx : cy;
+    let c = c0, converged = false;
+    for (let it = 0; it < 8; it++) {
+        const r = alongX ? ev.val(c, cy) - L : ev.val(cx, c) - L;
+        const g = alongX ? ev.gx : ev.gy;
+        if (!(Math.abs(g) > 0)) break;
+        const d = r / g;
+        c = Math.min(hi, Math.max(lo, c - d));
+        if (Math.abs(c - c0) > 1) break;
+        if (Math.abs(d) < 1e-10) { converged = true; break; }
+    }
+    if (!converged) return [cx, cy];
+    return alongX ? [c, cy] : [cx, c];
 }
 
 // ---------------------------------------------------------------------------------------------

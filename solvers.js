@@ -12,6 +12,7 @@ import {
     compute_one_force_electrostatic, compute_one_force_magnetostatic,
 } from './maxwell/out/maxwell.js';
 import { makeFieldModel, LINE_CHARGE_KIND, WIRE_KIND } from './fieldmodels.js';
+import { makeGridFieldModel } from './gridfield.js';
 
 export const SOLVERS = {
     electrostatic_direct: {
@@ -25,11 +26,11 @@ export const SOLVERS = {
     },
     electrostatic_fourier: {
         label: 'Line charges [2D, grid solver]', type: 'grid', magnetic: false,
-        potential: false, forces: false, perCharge: false, fieldlines: false,
+        potential: false, forces: false, perCharge: false, fieldlines: true,
     },
     dynamic: {
         label: 'Dynamic (Maxwell) [2D]', type: 'grid', magnetic: false, dynamic: true,
-        potential: false, forces: false, perCharge: false, fieldlines: false,
+        potential: false, forces: false, perCharge: false, fieldlines: true,
     },
     magnetostatic_moving_charge: {
         label: 'Moving charges [3D, in-plane]', type: '3d', magnetic: true,
@@ -114,6 +115,10 @@ export function makeRenderModel(solver, { field, charges, uniformX, uniformY, wi
     // grid solvers (Fourier / dynamic)
     return {
         ...base, dimension: 2, perCharge: false,
+        // built lazily: only field-line mode needs it
+        get model2D() {
+            return this._grid ??= makeGridFieldModel({ field, charges, uniformX, uniformY, width, height });
+        },
         fieldToBuffer: compute_electric_field_dynamic_to_buffer,
         fieldPerChargeToBuffer: compute_electric_field_dynamic_to_buffer,
         forceOn: () => ({ u: 0, v: 0 }),
