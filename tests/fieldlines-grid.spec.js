@@ -232,3 +232,100 @@ test('the shaken dipole radiates closed field lines', async ({ page }) => {
     const [r] = await gridLines(page, [dynamic[2]]);
     expect(r.lines.filter(l => l.closed).length).toBeGreaterThan(0);
 });
+
+// Causality (dynamic solver): while a charge is dragged, the field lines ahead of the wavefront must
+// not move: by at most 0.5 px, or 2% of the local line spacing where the field is weak. Light travels
+// 1 px per 5 ms; the margin covers the smeared charge (8 cells, ~63 px in x).
+test('dynamic solver: field lines outside the light cone do not move during a drag', async ({ page }) => {
+    await page.goto('/tests/blank.html');
+    const problems = await page.evaluate(async () => {
+        const wasm = await import('/maxwell/out/maxwell.js');
+        await wasm.default();
+        const { makeGridFieldModel } = await import('/gridfield.js');
+        const { electricFieldLines } = await import('/fieldlines2d.js');
+        const W = 668, H = 335, frameMs = 1000 / 60, step = 0.1 * W / 111;
+        const out = [];
+        for (const scenario of [
+            { name: '+-3 pair, +3 dragged', charges: [{ x: 467.6, y: 167.5, charge: 3 }, { x: 200.4, y: 167.5, charge: -3 }], move: [60, 20] },
+            { name: 'single +2 dragged', charges: [{ x: 250, y: 150, charge: 2 }], move: [-40, 30] },
+        ]) {
+            const field = new wasm.FieldConfiguration(W, H, 111, 111);
+            const charges = scenario.charges.map(c => ({ ...c }));
+            const start = { ...charges[0] };
+            field.set_charges(charges);
+            let model;
+            const lines = () => {
+                model = makeGridFieldModel({ field, charges, width: W, height: H });
+                return electricFieldLines(model, { width: W, height: H });
+            };
+            const before = lines();
+            // the local spacing of the field lines: psi changes by 1/4 between neighbours
+            const spacing = (x, y) => { const e = model.fieldAt(x, y); return 2 * Math.PI * model.K / (4 * Math.hypot(e.u, e.v)); };
+            // points of `a` farther than `r` from the moving charge's path, and their distance to the nearest segment of `b`
+            const far = (a, b, r, u) => {
+                const [ex, ey] = [scenario.move[0] * u, scenario.move[1] * u];
+                const fromPath = (x, y) => {
+                    const l2 = ex * ex + ey * ey, t = l2 ? Math.max(0, Math.min(1, ((x - start.x) * ex + (y - start.y) * ey) / l2)) : 0;
+                    return Math.hypot(x - start.x - t * ex, y - start.y - t * ey);
+                };
+                // the worst ratio of the displacement to the allowed one: max(0.5 px, 2% of the line spacing)
+                let worst = 0, at = null, n = 0, px = 0;
+                for (const l of a) for (const [x, y] of l.points) {
+                    if (fromPath(x, y) < r || x < 1 || y < 1 || x > W - 1 || y > H - 1) continue;
+                    n++;
+                    let best = Infinity;
+                    for (const m of b) for (let k = 0; k + 1 < m.points.length; k++) {
+                        const [p, q] = [m.points[k], m.points[k + 1]];
+                        const dx = q[0] - p[0], dy = q[1] - p[1], l2 = dx * dx + dy * dy;
+                        const t = l2 ? Math.max(0, Math.min(1, ((x - p[0]) * dx + (y - p[1]) * dy) / l2)) : 0;
+                        best = Math.min(best, Math.hypot(x - p[0] - t * dx, y - p[1] - t * dy));
+                    }
+                    const ratio = best / Math.max(0.5, 0.02 * spacing(x, y));
+                    if (ratio > worst) { worst = ratio; at = [x, y]; px = best; }
+                }
+                return { worst, at, n, px };
+            };
+            for (let f = 1; f <= 30; f++) {
+                const t = f * frameMs, u = Math.min(1, t / 300);
+                charges[0].x = start.x + scenario.move[0] * u;
+                charges[0].y = start.y + scenario.move[1] * u;
+                field.set_charges(charges);
+                let dt = frameMs / 5;
+                while (dt > 0) { const s = Math.min(step, dt); field.tick(s); dt -= s; }
+                const now = lines();
+                if (f % 5) continue;
+                const r = t / 5 + 80;
+                for (const [a, b, what] of [[now, before, 'a line point'], [before, now, 'an earlier line point']]) {
+                    const { worst, at, n, px } = far(a, b, r, u);
+                    if (n > 0 && worst > 1)
+                        out.push(`${scenario.name}, ${t.toFixed(0)} ms: ${what} at (${at[0].toFixed(0)}, ${at[1].toFixed(0)}), outside the light cone (r > ${r.toFixed(0)} px), is ${px.toFixed(2)} px (${(100 * px / spacing(at[0], at[1])).toFixed(1)}% of the line spacing) from the other frame's lines`);
+                }
+            }
+        }
+        return out;
+    });
+    expect(problems).toEqual([]);
+});
+
+// As for the analytic models (decision D5): a symmetric +-3 pair has a field line along its axis,
+// for the Fourier solver and for the dynamic solver's starting state.
+test('grid solvers: a +-3 pair has a field line along its axis', async ({ page }) => {
+    await page.goto('/tests/blank.html');
+    const found = await page.evaluate(async () => {
+        const wasm = await import('/maxwell/out/maxwell.js');
+        await wasm.default();
+        const { makeGridFieldModel } = await import('/gridfield.js');
+        const { electricFieldLines } = await import('/fieldlines2d.js');
+        const charges = [{ x: 467.6, y: 167.5, charge: 3 }, { x: 200.4, y: 167.5, charge: -3 }];
+        const out = [];
+        for (const dynamic of [false, true]) {
+            const field = new wasm.FieldConfiguration(668, 335, 111, 111);
+            field.set_charges(charges);
+            if (!dynamic) field.reset_fields();
+            const lines = electricFieldLines(makeGridFieldModel({ field, charges, width: 668, height: 335 }), { width: 668, height: 335 });
+            out.push(lines.some(l => l.from === 0 && l.to === 1 && l.points.every(([, y]) => Math.abs(y - 167.5) < 0.5)));
+        }
+        return out;
+    });
+    expect(found).toEqual([true, true]);
+});

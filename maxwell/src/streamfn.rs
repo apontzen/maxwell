@@ -258,6 +258,119 @@ pub fn stream_function_rest(solver: &mut StreamFunctionSolver, geometry: &Geomet
     rhs
 }
 
+// ---------------------------------------------------------------------------------------------
+// Choice of the drawn levels (the gauge of psi)
+//
+// Field lines are the contours psi = k / LINES_PER_UNIT_CHARGE, so only psi modulo the line spacing
+// matters, and adding a constant to psi shifts every line. Two choices:
+//
+// - canonical (static solvers, and the state a settled dynamic field relaxes to): psi_rest has mean
+//   zero over the canvas (as solved). psi_rest is then odd under any reflection symmetry of the
+//   configuration, so, as for the analytic models (decision D5), e.g. a +-q pair has a line along
+//   its axis. (Matching psi to the free-space value around the edge instead does not work: the
+//   periodic images make psi_rest vary there by most of a line spacing.)
+// - causal (dynamic solver): away from currents, Maxwell's equations give
+//       flux_per_unit_charge * d psi / dt = B_z + mean_jx * y - mean_jy * x
+//   (the last terms from the uniform background current, see make_currents), exactly on the
+//   staggered grid. So the offset is chosen each frame so that psi has changed by the time integral
+//   of the right-hand side since the previous frame, at every corner away from the charges. Then psi
+//   changes only where B does, and lines ahead of the wavefront do not move at all.
+// ---------------------------------------------------------------------------------------------
+
+/// Must match LINES_PER_UNIT_CHARGE in fieldmodels.js
+pub const LINES_PER_UNIT_CHARGE: f64 = 4.0;
+
+/// The drawn psi at the previous computation, for the causal choice.
+pub struct GaugeHistory {
+    /// psi_rest + offset + free-space psi of the point charges (principal values), at the corners
+    pub psi: Vec<f64>,
+    /// the charges' positions at that time
+    pub positions: Vec<(f64, f64)>,
+}
+
+/// Free-space stream function of point charges (principal values) at the corners.
+pub fn free_psi_at_corners(geometry: &Geometry, xs: &[f64], ys: &[f64], qs: &[f64]) -> Vec<f64> {
+    let m = geometry.nx - 2 * geometry.nboundary + 1;
+    let (dx, dy) = (geometry.delta_x(), geometry.delta_y());
+    let mut out = vec![0.0; m * m];
+    for a in 0..m {
+        for b in 0..m {
+            let (x, y) = (a as f64 * dx, b as f64 * dy);
+            let mut s = 0.0;
+            for k in 0..qs.len() { s += qs[k] * (y - ys[k]).atan2(x - xs[k]); }
+            out[a * m + b] = s / (2.0 * std::f64::consts::PI);
+        }
+    }
+    out
+}
+
+/// x - nearest integer
+fn wrap_unit(x: f64) -> f64 { x - x.round() }
+
+/// Circular mean (period 1) of values, robust against a few outliers: a second pass uses only the
+/// values within 0.1 of the first estimate. None if there are too few values.
+fn circular_mean(values: &[f64]) -> Option<f64> {
+    if values.len() < 20 { return None; }
+    let tau = 2.0 * std::f64::consts::PI;
+    let mean_of = |vals: &mut dyn Iterator<Item = &f64>| -> Option<f64> {
+        let (mut c, mut s, mut n) = (0.0, 0.0, 0);
+        for v in vals { c += (tau * v).cos(); s += (tau * v).sin(); n += 1; }
+        if n == 0 || (c * c + s * s).sqrt() < 1e-9 * n as f64 { None } else { Some(s.atan2(c) / tau) }
+    };
+    let first = mean_of(&mut values.iter())?;
+    mean_of(&mut values.iter().filter(|v| wrap_unit(*v - first).abs() < 0.1)).or(Some(first))
+}
+
+/// Corners further than this from a charge (in cells, in each direction) are clear of its smeared
+/// charge and current (4 sigma = 8 cells, plus a margin).
+const EXCLUSION_CELLS: f64 = 10.0;
+
+/// Is the corner (x, y) clear of the charges, including the paths along which they moved?
+fn clear_of_charges(x: f64, y: f64, rx: f64, ry: f64, paths: &[((f64, f64), (f64, f64))]) -> bool {
+    for &((x0, y0), (x1, y1)) in paths {
+        // distance to the segment in units scaled by (rx, ry)
+        let (px, py) = ((x - x0) / rx, (y - y0) / ry);
+        let (ex, ey) = ((x1 - x0) / rx, (y1 - y0) / ry);
+        let l2 = ex * ex + ey * ey;
+        let t = if l2 > 0.0 { ((px * ex + py * ey) / l2).clamp(0.0, 1.0) } else { 0.0 };
+        if (px - t * ex).powi(2) + (py - t * ey).powi(2) < 1.0 { return false; }
+    }
+    true
+}
+
+/// The causal offset (in units of charge) to add to psi_rest, given psi_raw = psi_rest + free psi
+/// now, the history, the time integral of B_z (padded grid) and of the mean current since then, and
+/// the charges' current positions. None if it can't be determined.
+pub fn causal_offset(geometry: &Geometry, raw: &[f64], history: &GaugeHistory, b_integral: &Array2<f64>,
+                     mean_current_integral: (f64, f64), flux_per_unit_charge: f64,
+                     positions: &[(f64, f64)], deposit_positions: &[(f64, f64)]) -> Option<f64> {
+    if history.positions.len() != positions.len() { return None; }
+    let nb = geometry.nboundary;
+    let m = geometry.nx - 2 * nb + 1;
+    let (dx, dy) = (geometry.delta_x(), geometry.delta_y());
+    let mut paths: Vec<_> = history.positions.iter().zip(positions.iter()).map(|(&p, &q)| (p, q)).collect();
+    paths.extend(deposit_positions.iter().map(|&p| (p, p)));
+    let (mx, my) = mean_current_integral;
+    let mut vals = Vec::with_capacity(m * m);
+    // the corners next to the edge are skipped: their faces border the absorbing layer
+    for a in 2..m - 2 {
+        for b in 2..m - 2 {
+            let (x, y) = (a as f64 * dx, b as f64 * dy);
+            if !clear_of_charges(x, y, EXCLUSION_CELLS * dx, EXCLUSION_CELLS * dy, &paths) { continue; }
+            // psi at corner (a, b) changes with B_z at the Yee node of padded cell (a + nb - 1, b + nb - 1)
+            let predicted = (b_integral[[a + nb - 1, b + nb - 1]] + mx * y - my * x) / flux_per_unit_charge;
+            let p = a * m + b;
+            vals.push(LINES_PER_UNIT_CHARGE * (history.psi[p] + predicted - raw[p]));
+        }
+    }
+    circular_mean(&vals).map(|mu| mu / LINES_PER_UNIT_CHARGE)
+}
+
+/// The difference a - b of two offsets (units of charge), wrapped to within half a line spacing.
+pub fn offset_difference(a: f64, b: f64) -> f64 {
+    wrap_unit(LINES_PER_UNIT_CHARGE * (a - b)) / LINES_PER_UNIT_CHARGE
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

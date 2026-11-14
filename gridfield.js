@@ -9,6 +9,10 @@
 // the grid's physical region (the canvas) and interpolated here (bicubic Catmull-Rom, so its
 // gradient is continuous).
 //
+// The additive constant of psi_rest chooses which contours are drawn. For the dynamic solver the
+// WASM module evolves it causally from frame to frame, so that lines ahead of the wavefront don't
+// move when a charge is dragged (see maxwell/src/streamfn.rs).
+//
 // The model has the interface of fieldmodels.js's electric model as far as fieldlines2d.js needs
 // it, plus `psiRest`. The world ends at the edge of the canvas (beyond it is the absorbing layer
 // of the grid), so lines leaving the canvas end there ("infinity").

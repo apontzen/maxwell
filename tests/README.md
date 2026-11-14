@@ -129,7 +129,9 @@ solvers); see [issue #3](https://github.com/apontzen/maxwell/issues/3). Their ge
   `dynamic`; `gridfield.js` on top of the stream function computed in `maxwell/src/streamfn.rs`):
   4|q| line ends per charge, lines end on a charge, on the edge of the canvas (the grid world ends
   there) or fade out where there is no field, tangency, Gauss's law, a time budget, and closed
-  field lines radiated by a shaken dipole. The lecture examples, random configurations and a net
+  field lines radiated by a shaken dipole; a line along the axis of a +-3 pair (as decision D5);
+  and, for the dynamic solver, that field lines outside the light cone do not move while a charge
+  is dragged (the drawn levels are chosen causally, see `maxwell/src/streamfn.rs`). The lecture examples, random configurations and a net
   charge are used for the Fourier solver; for the dynamic solver, lecture 14 before and after a
   drag and lecture 16 after shaking a charge.
 - The Rust unit tests (`cargo test --lib` in `maxwell/`) check the stream function's least-squares
@@ -137,7 +139,8 @@ solvers); see [issue #3](https://github.com/apontzen/maxwell/issues/3). Their ge
   (outside the smeared charges) for a static field, and continuously as a charge crosses cells.
   They also check the dynamic solver: static charges keep their field exactly, Gauss's law holds
   during sub-cell drags, the field settles to the static one after a drag, and radiation leaves
-  through the absorbing layer.
+  through the absorbing layer; and the causal choice of field lines: psi outside the light cone of
+  a spinning dipole is unchanged, and settled lines match the static ones.
 - `solvers.spec.js` checks the solver registry (`solvers.js`): which model is used in
   each mode, the deprecated alias, and that forces and fields come from the same 2D model.
 
