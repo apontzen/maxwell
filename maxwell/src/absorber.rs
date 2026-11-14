@@ -314,7 +314,9 @@ impl Absorber {
                 let (x, y, q) = charges[k];
                 let (rx, ry, _) = self.reference[k];
                 // retarded time (c = 1 px per time unit), from the distance to where the charge is now
-                let t_ret = time - (cx - x).hypot(cy - y);
+                // (sqrt, not hypot: on wasm32 since Rust 1.97 f64::hypot is a software routine using
+                // a software fma, 4x slower, and this runs for every layer cell; no overflow here)
+                let t_ret = time - ((cx - x) * (cx - x) + (cy - y) * (cy - y)).sqrt();
                 let last_move = self.history[k].back().unwrap().0;
                 let a = if t_ret >= last_move {
                     self.green_current[k].1[idx]          // the wave of its last move has passed
