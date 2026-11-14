@@ -80,6 +80,8 @@ pub struct FieldConfiguration {
     time_since_stream_function: f64,
     time_since_motion: f64,
     gauge_history: Option<streamfn::GaugeHistory>,
+    // field lines per unit charge (the line spacing is 1 / this; see set_lines_per_unit_charge)
+    lines_per_unit_charge: f64,
 }
 
 
@@ -163,7 +165,8 @@ impl FieldConfiguration {
             elec_uniform_x: 0.0, elec_uniform_y: 0.0, stream_solver: None,
             absorber: None, currents_nonzero: false,
             simulation_time: 0.0, b_integral: None,
-            time_since_stream_function: 0.0, time_since_motion: f64::INFINITY, gauge_history: None }
+            time_since_stream_function: 0.0, time_since_motion: f64::INFINITY, gauge_history: None,
+            lines_per_unit_charge: streamfn::DEFAULT_LINES_PER_UNIT_CHARGE }
     }
 }
 
@@ -178,6 +181,15 @@ impl FieldConfiguration {
                 vec![]
             }
         };
+    }
+
+    /// The number of field lines per unit charge drawn (compute_grid_stream_function_rest chooses
+    /// psi's additive constant modulo the line spacing). A change restarts the causal choice.
+    pub fn set_lines_per_unit_charge(&mut self, n: f64) {
+        if n != self.lines_per_unit_charge {
+            self.lines_per_unit_charge = n;
+            self.gauge_history = None;
+        }
     }
 
     /// The time step to use for tick(): 0.3 of the Courant stability limit of the grid (larger steps
@@ -663,7 +675,7 @@ pub fn compute_grid_stream_function_rest(field_configuration: &mut FieldConfigur
         Some(history) if fc.time_since_stream_function <= GAUGE_MAX_GAP => {
             let deposits: Vec<(f64, f64)> = fc.charges_at_last_tick.iter().map(|c| (c.x, c.y)).collect();
             streamfn::causal_offset(&fc.geometry, &raw, history, fc.b_integral.as_ref().unwrap(),
-                                    flux_per_unit_charge, &positions, &deposits)
+                                    flux_per_unit_charge, &positions, &deposits, fc.lines_per_unit_charge)
         }
         _ => None,
     };
@@ -675,7 +687,7 @@ pub fn compute_grid_stream_function_rest(field_configuration: &mut FieldConfigur
             let settle_time = fc.geometry.x_max.hypot(fc.geometry.y_max);
             if fc.time_since_motion > settle_time {
                 let w = 1.0 - (-fc.time_since_stream_function / GAUGE_RELAXATION_TIME).exp();
-                c + w * streamfn::offset_difference(canonical, c)
+                c + w * streamfn::offset_difference(canonical, c, fc.lines_per_unit_charge)
             } else {
                 c
             }
@@ -913,7 +925,7 @@ mod dynamic_solver_tests {
 #[cfg(test)]
 mod causal_field_line_tests {
     use super::*;
-    const LPU: f64 = streamfn::LINES_PER_UNIT_CHARGE;
+    const LPU: f64 = streamfn::DEFAULT_LINES_PER_UNIT_CHARGE;
     const CENTRE: (f64, f64) = (300.0, 167.5);
     const ARM: f64 = 20.0;
 

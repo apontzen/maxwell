@@ -113,3 +113,51 @@ test('stream function and potential are consistent with the field', async ({ pag
     }
     expect(Math.abs(r.BdotGradA)).toBeLessThan(1e-6 * r.Bmag ** 2);
 });
+
+test('field lines per unit charge and the level offset: defaults, and set per embed', async ({ page }) => {
+    const r = await page.evaluate(async () => {
+        const wasm = await import('/maxwell/out/maxwell.js');
+        const s = await import('/solvers.js');
+        const { electricFieldLines } = await import('/fieldlines2d.js');
+        const W = 668, H = 335;
+        const charges = [{ x: 200, y: 167.5, charge: 2 }, { x: 468, y: 167.5, charge: -2 }];
+        const ends = (lines) => lines.filter(l => l.from === 0).length;   // lines leaving the +2 charge
+        const run = (solver, fieldLines) => {
+            const field = new wasm.FieldConfiguration(W, H, 111, 111);
+            field.set_charges(charges);
+            field.reset_fields();
+            const m = s.makeRenderModel(solver, { field, charges, uniformX: 0, uniformY: 0, width: W, height: H, fieldLines }).model2D;
+            const lines = electricFieldLines(m, { width: W, height: H });
+            return { n: m.linesPerUnitCharge, f: m.levelOffset, ends: ends(lines), levels: [...new Set(lines.map(l => +l.level.toFixed(6)))].sort((a, b) => a - b) };
+        };
+        const out = {};
+        for (const solver of ['electrostatic_line_charge', 'electrostatic_fourier'])
+            out[solver] = [run(solver, {}), run(solver, { linesPerUnitCharge: 3, levelOffset: 0 }), run(solver, { linesPerUnitCharge: null })];
+        return out;
+    });
+    for (const [solver, [byDefault, set, unset]] of Object.entries(r)) {
+        expect(byDefault, solver).toMatchObject({ n: 5, f: 0.5, ends: 10 });
+        // levels (k + 1/2) / 5
+        for (const l of byDefault.levels) expect(Math.abs(5 * l - 0.5 - Math.round(5 * l - 0.5)), `${solver} level ${l}`).toBeLessThan(1e-5);
+        expect(set, solver).toMatchObject({ n: 3, f: 0, ends: 6 });
+        for (const l of set.levels) expect(Math.abs(3 * l - Math.round(3 * l)), `${solver} level ${l}`).toBeLessThan(1e-5);
+        expect(unset, solver).toMatchObject({ n: 5, f: 0.5 });
+    }
+});
+
+test('the field-line settings in an embed\'s state are used', async ({ page }) => {
+    const { examples } = await import('./helpers.js');
+    const base = { ...examples.find(e => e.id === 'lecture04-2').state, plotType: 'fieldline' };
+    const render = async (state) => {
+        await page.goto('/tests/harness.html?attrs=' + encodeURIComponent(JSON.stringify({ meme: JSON.stringify(state) })));
+        const canvas = page.locator('meme-embed canvas').first();
+        await expect(canvas).toBeVisible();
+        await page.waitForTimeout(300);
+        return canvas.evaluate(c => c.toDataURL());
+    };
+    const byDefault = await render(base);
+    const explicit = await render({ ...base, linesPerUnitCharge: 5, fieldLineOffset: 0.5 });
+    const original = await render({ ...base, linesPerUnitCharge: 4, fieldLineOffset: 0 });
+    expect(explicit).toBe(byDefault);
+    expect(original).not.toBe(byDefault);
+});

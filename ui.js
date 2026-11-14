@@ -66,6 +66,7 @@ export async function main(params) {
 
     let showPotential = false;
     let perCharge = false;
+    let linesPerUnitCharge = null, fieldLineOffset = null;   // null: the defaults (fieldmodels.js)
     // The solver chosen by the user / stored in the JSON state (canonical name). What is actually
     // drawn uses effectiveSolver(solver, plotType): in field-line mode 3D solvers are replaced by
     // their 2D counterparts (see solvers.js).
@@ -287,7 +288,10 @@ export async function main(params) {
             uniformElecX: uniformElecX * rect.height, 
             uniformElecY: uniformElecY * rect.width,
             dipoleMode: dipoleMode,
-            extraDrawInfo: extraDrawInfo
+            extraDrawInfo: extraDrawInfo,
+            // only if set in the state loaded (otherwise the defaults in fieldmodels.js apply)
+            ...(linesPerUnitCharge != null && { linesPerUnitCharge }),
+            ...(fieldLineOffset != null && { fieldLineOffset }),
         });
     }
 
@@ -330,6 +334,11 @@ export async function main(params) {
 
             if (state.extraDrawInfo !== undefined)
                 extraDrawInfo = state.extraDrawInfo;
+
+            // electric field lines: lines per unit charge, and the offset of the drawn levels as a
+            // fraction of the line spacing (fieldmodels.js; defaults there if not given)
+            linesPerUnitCharge = state.linesPerUnitCharge ?? null;
+            fieldLineOffset = state.fieldLineOffset ?? null;
 
             updateSolverType();
 
@@ -428,6 +437,7 @@ export async function main(params) {
         const renderModel = makeRenderModel(effectiveSolver(solver, plotType), {
             field, charges, uniformX: uniformElecX, uniformY: uniformElecY,
             width: rect.width, height: rect.height, perCharge,
+            fieldLines: { linesPerUnitCharge, levelOffset: fieldLineOffset },
         });
 
         let forces = null;

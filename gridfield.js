@@ -18,6 +18,7 @@
 // of the grid), so lines leaving the canvas end there ("infinity").
 
 import { compute_grid_stream_function_rest, grid_physical_cells } from './maxwell/out/maxwell.js';
+import { LINES_PER_UNIT_CHARGE, LEVEL_OFFSET } from './fieldmodels.js';
 
 export const GRID_KIND = 'electrostatic_grid';
 
@@ -70,16 +71,20 @@ export class CornerInterpolant {
 }
 
 /**
- * @param {{field: FieldConfiguration, charges, uniformX, uniformY, width, height}} config
+ * @param {{field: FieldConfiguration, charges, uniformX, uniformY, width, height, linesPerUnitCharge,
+ *          levelOffset}} config
  *   field must already hold the charges (and, for the dynamic solver, the current fields).
+ *   linesPerUnitCharge, levelOffset: as for fieldmodels.js's electric model.
  */
-export function makeGridFieldModel({ field, charges, uniformX = 0, uniformY = 0, width, height }) {
+export function makeGridFieldModel({ field, charges, uniformX = 0, uniformY = 0, width, height,
+                                     linesPerUnitCharge = LINES_PER_UNIT_CHARGE, levelOffset = LEVEL_OFFSET }) {
     const sources = charges.filter(c => !c.isTestCharge);
     const n = grid_physical_cells(field);
     const m = n + 1;
     const xs = Float64Array.from(sources, c => c.x);
     const ys = Float64Array.from(sources, c => c.y);
     const qs = Float64Array.from(sources, c => c.charge);
+    field.set_lines_per_unit_charge(linesPerUnitCharge);   // psi's constant is chosen modulo the line spacing
     const data = compute_grid_stream_function_rest(field, xs, ys, qs);
     const psiRest = new CornerInterpolant(data, m, width / n, height / n);
     const K = GRID_FLUX_PER_UNIT_CHARGE / (2 * Math.PI);
@@ -101,6 +106,7 @@ export function makeGridFieldModel({ field, charges, uniformX = 0, uniformY = 0,
         // E of a unit point charge at distance r is K / r (flux 2 pi K per unit charge)
         K,
         uniform: { x: uniformX, y: uniformY }, width, height,
+        linesPerUnitCharge, levelOffset,
         fieldAt,
         fieldToBuffer(_f, x, y, buffer) {
             const { u, v } = fieldAt(x, y);

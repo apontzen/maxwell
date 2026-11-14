@@ -261,13 +261,14 @@ pub fn stream_function_rest(solver: &mut StreamFunctionSolver, geometry: &Geomet
 // ---------------------------------------------------------------------------------------------
 // Choice of the drawn levels (the gauge of psi)
 //
-// Field lines are the contours psi = k / LINES_PER_UNIT_CHARGE, so only psi modulo the line spacing
-// matters, and adding a constant to psi shifts every line. Two choices:
+// Field lines are the contours psi = (k + f) / N (N lines per unit charge, f a fixed fraction, both
+// set in JS; see fieldlines2d.js), so only psi modulo the line spacing 1 / N matters, and adding a
+// constant to psi shifts every line. Two choices:
 //
 // - canonical (static solvers, and the state a settled dynamic field relaxes to): psi_rest has mean
 //   zero over the canvas (as solved). psi_rest is then odd under any reflection symmetry of the
-//   configuration, so, as for the analytic models (decision D5), e.g. a +-q pair has a line along
-//   its axis. (Matching psi to the free-space value around the edge instead does not work: the
+//   configuration, so the lines are as for the analytic models (decision D5): e.g. with f = 0 a
+//   +-q pair has a line along its axis. (Matching psi to the free-space value around the edge instead does not work: the
 //   periodic images make psi_rest vary there by most of a line spacing.)
 // - causal (dynamic solver): away from currents, Maxwell's equations give
 //       flux_per_unit_charge * d psi / dt = B_z
@@ -276,8 +277,9 @@ pub fn stream_function_rest(solver: &mut StreamFunctionSolver, geometry: &Geomet
 //   changes only where B does, and lines ahead of the wavefront do not move at all.
 // ---------------------------------------------------------------------------------------------
 
-/// Must match LINES_PER_UNIT_CHARGE in fieldmodels.js
-pub const LINES_PER_UNIT_CHARGE: f64 = 4.0;
+/// The default number of field lines per unit charge (FieldConfiguration::set_lines_per_unit_charge);
+/// as LINES_PER_UNIT_CHARGE in fieldmodels.js
+pub const DEFAULT_LINES_PER_UNIT_CHARGE: f64 = 5.0;
 
 /// The drawn psi at the previous computation, for the causal choice.
 pub struct GaugeHistory {
@@ -339,10 +341,10 @@ fn clear_of_charges(x: f64, y: f64, rx: f64, ry: f64, paths: &[((f64, f64), (f64
 
 /// The causal offset (in units of charge) to add to psi_rest, given psi_raw = psi_rest + free psi
 /// now, the history, the time integral of B_z (padded grid) since then, and the charges' current
-/// positions. None if it can't be determined.
+/// positions; modulo the line spacing 1 / lines_per_unit_charge. None if it can't be determined.
 pub fn causal_offset(geometry: &Geometry, raw: &[f64], history: &GaugeHistory, b_integral: &Array2<f64>,
                      flux_per_unit_charge: f64,
-                     positions: &[(f64, f64)], deposit_positions: &[(f64, f64)]) -> Option<f64> {
+                     positions: &[(f64, f64)], deposit_positions: &[(f64, f64)], lines_per_unit_charge: f64) -> Option<f64> {
     if history.positions.len() != positions.len() { return None; }
     let nb = geometry.nboundary;
     let m = geometry.nx - 2 * nb + 1;
@@ -358,15 +360,15 @@ pub fn causal_offset(geometry: &Geometry, raw: &[f64], history: &GaugeHistory, b
             // psi at corner (a, b) changes with B_z at the Yee node of padded cell (a + nb - 1, b + nb - 1)
             let predicted = b_integral[[a + nb - 1, b + nb - 1]] / flux_per_unit_charge;
             let p = a * m + b;
-            vals.push(LINES_PER_UNIT_CHARGE * (history.psi[p] + predicted - raw[p]));
+            vals.push(lines_per_unit_charge * (history.psi[p] + predicted - raw[p]));
         }
     }
-    circular_mean(&vals).map(|mu| mu / LINES_PER_UNIT_CHARGE)
+    circular_mean(&vals).map(|mu| mu / lines_per_unit_charge)
 }
 
 /// The difference a - b of two offsets (units of charge), wrapped to within half a line spacing.
-pub fn offset_difference(a: f64, b: f64) -> f64 {
-    wrap_unit(LINES_PER_UNIT_CHARGE * (a - b)) / LINES_PER_UNIT_CHARGE
+pub fn offset_difference(a: f64, b: f64, lines_per_unit_charge: f64) -> f64 {
+    wrap_unit(lines_per_unit_charge * (a - b)) / lines_per_unit_charge
 }
 
 #[cfg(test)]

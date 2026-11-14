@@ -19,11 +19,12 @@
 //     level: number,           // the value of the stream function psi on this line (mod q)
 // }>
 //   - model.kind === 'electrostatic_line_charge'.
-//   - Lines are contours of model.streamFunctionAt at levels k / LINES_PER_UNIT_CHARGE (D4).
-//     With the offset C = 0 (D5) the levels are exactly the multiples of 1/LINES_PER_UNIT_CHARGE.
-//   - Every source of charge q has exactly LINES_PER_UNIT_CHARGE * |q| line ends attached, for q
-//     a multiple of 1/LINES_PER_UNIT_CHARGE. (Lines from a charge back to the same charge are
-//     impossible for a static field.)
+//   - Lines are contours of model.streamFunctionAt at the levels (k + f) / N, k integer, with
+//     N = model.linesPerUnitCharge and f = model.levelOffset (defaults LINES_PER_UNIT_CHARGE and
+//     LEVEL_OFFSET in fieldmodels.js; decisions D4, D5 as revised: originally N = 4, f = 0).
+//   - Every source of charge q has exactly N|q| line ends attached, for q a multiple of 1/N
+//     (otherwise the nearest whole number below or above, with a console warning). (Lines from a
+//     charge back to the same charge are impossible for a static field.)
 //   - Includes lines from/to infinity, including those of the uniform field (model.uniform),
 //     which may not touch any charge. Each physical line appears exactly once.
 //   - A line ending on a charge ends exactly at the charge's position.
@@ -58,7 +59,7 @@
 // "infinity" at 10 view diagonals. Stagnation points are found exactly (polynomial roots); a
 // line/contour that runs exactly into one (by symmetry) is continued along the next branch, so
 // each branch of the crossing is drawn once.
-//   Electric: each source is seeded at the LPU*|q| exact crossings of psi = k/LPU on a small
+//   Electric: each source is seeded at the N|q| exact crossings of the levels of psi on a small
 //   circle around it. Lines from positive sources are traced along E and claim the slot of the
 //   negative source they reach; the unclaimed slots of negative sources are traced backwards to
 //   infinity. With a uniform field, lines touching no source are seeded where psi crosses a level
@@ -84,7 +85,6 @@ import {
 
 export { LINES_PER_UNIT_CHARGE };
 
-const LPU = LINES_PER_UNIT_CHARGE;
 const TWO_PI = 2 * Math.PI;
 
 // Contour spacing in units of model.K (see contourStep). pi/4 gives lecture 4's equipotentials
@@ -131,13 +131,12 @@ function dominanceRadius(T, i) {
 }
 
 /**
- * The LPU*|q| points where the field lines of source i cross a small circle around it, with the
+ * The N|q| points where the field lines of source i cross a small circle around it, with the
  * psi frame (unwrapped angles) at each.
  */
 function chargeSlots(T, ev, i) {
-    const q = T.qs[i];
-    const nl = Math.round(LPU * Math.abs(q));
-    if (nl === 0) return null;
+    const q = T.qs[i], N = T.lpu;
+    if (q === 0) return null;
     const rho = dominanceRadius(T, i);
     const xi = T.xs[i], yi = T.ys[i];
     const thc = new Float64Array(T.n);
@@ -151,14 +150,18 @@ function chargeSlots(T, ev, i) {
             th[j] = j === i ? alpha : thc[j] + wrap(Math.atan2(y - T.ys[j], x - T.xs[j]) - thc[j]);
             s += T.qs[j] * th[j];
         }
-        return { x, y, th, psi: s / TWO_PI + (T.ux * (y - T.myc) - T.uy * (x - T.mxc)) * c + ev.restAt(x, y) };
+        return { x, y, th, psi: s / TWO_PI + (T.ux * (y - T.myc) - T.uy * (x - T.mxc)) * c + ev.restAt(x, y) + T.psiShift };
     };
     const a = state(-Math.PI).psi;
     const sgn = q > 0 ? 1 : -1;
-    const k0 = q > 0 ? Math.ceil(LPU * a - 1e-9) : Math.floor(LPU * a + 1e-9);
+    // the levels crossed going once round: N|q| of them (if that is a whole number; otherwise the
+    // nearest whole number below or above, depending on where the levels fall)
+    const first = (v) => q > 0 ? Math.ceil(N * v - 1e-9) : Math.floor(N * v + 1e-9);
+    const k0 = first(a), nl = Math.abs(first(a + q) - k0);
+    if (nl === 0) return null;
     const list = [];
     for (let m = 0; m < nl; m++) {
-        const level = (k0 + sgn * m) / LPU;
+        const level = (k0 + sgn * m) / N;
         // psi is monotonic in alpha (increasing for q > 0) on [-pi - 0.1, pi + 0.1]
         const lo = -Math.PI - 0.1, hi = Math.PI + 0.1;
         const f = (t) => state(t).psi - level;
@@ -201,7 +204,8 @@ export function electricFieldLines(model, view) {
     const reduced = { ...model, sources: keep.map(k => merged[k]) };
     const lines = electricLines(reduced, view);
     // remaining capacity of each original source
-    const cap = src.map(c => Math.round(LPU * Math.abs(c.charge)));
+    const N = model.linesPerUnitCharge ?? LINES_PER_UNIT_CHARGE;
+    const cap = src.map(c => Math.round(N * Math.abs(c.charge)));
     const take = (g, sign) => {
         for (const i of groups[g]) if (cap[i] > 0 && Math.sign(src[i].charge) === sign) { cap[i]--; return i; }
         return -1;
@@ -240,6 +244,7 @@ function electricLines(model, view) {
     Object.keys(diagnostics).forEach(k => delete diagnostics[k]);
     Object.assign(diagnostics, diag);
     if (T.n === 0 && !T.hasUniform && !T.region) return [];
+    warnFractionalLines(T);
     const ev = new PsiEvaluator(T);
     T.crit = T.rest ? gridStagnationPoints(T, ev) : stagnationPoints(T);
     const tag = levelTagger(T);
@@ -252,12 +257,12 @@ function electricLines(model, view) {
     const tolerance = T.region ? GRID_SNAP_TOLERANCE : 1e-8;
     for (const s of T.crit) {
         if (s.extremum) continue;
-        const v = LPU * ev.principal(s.x, s.y);
+        const v = T.lpu * ev.principal(s.x, s.y);
         const off = Math.abs(v - Math.round(v));
         if (off < tolerance) {
-            const level = Math.round(v) / LPU;
-            if (T.region) { snaps.push(lazySnap(T, s, level, 1 / LPU, off / LPU)); continue; }
-            const p = prepareSnap(T, ev, s, 1 / LPU);
+            const level = Math.round(v) / T.lpu;
+            if (T.region) { snaps.push(lazySnap(T, s, level, 1 / T.lpu, off / T.lpu)); continue; }
+            const p = prepareSnap(T, ev, s, 1 / T.lpu);
             if (p) { p.level = level; snaps.push(p); }
         }
     }
@@ -366,20 +371,44 @@ function electricLines(model, view) {
         if (T.region) closedLoops(T, ev, hash, tag, captureNeg, capturePos, snaps, lines);
     }
     Object.assign(diagnostics, diag, { stagnation: T.crit.length, snaps: snaps.length });
+    // the levels traced are those of psi + T.psiShift
+    for (const l of lines) l.level -= T.psiShift;
     return lines;
 }
 
+const warned = new Set();
+/** Warn (once per value) about charges that don't have a whole number of field lines. */
+function warnFractionalLines(T) {
+    for (let i = 0; i < T.n; i++) {
+        const n = T.lpu * Math.abs(T.qs[i]);
+        if (Math.abs(n - Math.round(n)) < 1e-6 || warned.has(n)) continue;
+        warned.add(n);
+        console.warn(`MEME: a charge of ${T.qs[i]} at ${T.lpu} field lines per unit charge would have ${n} lines; `
+            + `drawing ${Math.floor(n)} or ${Math.ceil(n)} (set linesPerUnitCharge so that every charge has a whole number)`);
+    }
+}
+
 /**
- * A label for the contour of psi at `level` (a multiple of 1/LPU): psi changes by q around a source
- * of charge q, so levels differing by a combination of the charges label the same contours.
+ * A label for the contour of psi at `level` (a multiple of 1/N): psi changes by q around a source
+ * of charge q, so levels differing by an integer combination of the charges label the same
+ * contours. In units of the line spacing those combinations are the multiples of G (0: none).
  */
 function levelTagger(T) {
+    const N = T.lpu;
     const gcd = (a, b) => b ? gcd(b, a % b) : a;
+    // N q_i = a_i / d with integers a_i (d small): the combinations are multiples of gcd(a) / d,
+    // of which the integers are the multiples of gcd(a) / gcd(gcd(a), d)
     let G = 0;
-    for (let i = 0; i < T.n; i++) G = gcd(G, Math.round(LPU * Math.abs(T.qs[i])));
-    T.levelPeriod = G / LPU;   // for traceContour's snaps
-    return G ? (level => { const m = Math.round(LPU * level) % G; return m < 0 ? m + G : m; })
-             : (level => Math.round(LPU * level));
+    for (let d = 1; d <= 12; d++) {
+        const a = Array.from(T.qs, q => d * N * Math.abs(q));
+        if (!a.every(v => Math.abs(v - Math.round(v)) < 1e-6)) continue;
+        const g = a.reduce((g, v) => gcd(g, Math.round(v)), 0);
+        G = g ? g / gcd(g, d) : 0;
+        break;
+    }
+    T.levelPeriod = G / N;   // for traceContour's snaps
+    return G ? (level => { const m = Math.round(N * level) % G; return m < 0 ? m + G : m; })
+             : (level => Math.round(N * level));
 }
 
 /** Grid models: the edge of the world, moved just inside it. */
@@ -388,14 +417,14 @@ function regionSeedBox(T) {
     return { x0: r.x0, y0: r.y0, x1: r.x1, y1: r.y1 };
 }
 
-/** Points on the box boundary where psi (unwrapped along the boundary) crosses a level k / LPU. */
+/** Points on the box boundary where psi (unwrapped along the boundary) crosses a level k / T.lpu. */
 function psiBoxSeeds(T, ev, box) {
     const P = 2 * ((box.x1 - box.x0) + (box.y1 - box.y0));
     return psiPathSeeds(T, ev, s => boxPoint(box, s), P);
 }
 
 /**
- * Points on the path pointAt(s), 0 <= s <= P, where psi (unwrapped along it) crosses a level k / LPU,
+ * Points on the path pointAt(s), 0 <= s <= P, where psi (unwrapped along it) crosses a level k / T.lpu,
  * in order along the path. If `stop` is given, it is called with each, and a true result ends the
  * search. `origin`: the stagnation point the path starts from, if any (see sampleStep).
  */
@@ -409,14 +438,14 @@ function psiPathSeeds(T, ev, pointAt, P, stop, origin) {
         const thPrev = ev.saveState();
         const xp = x, yp = y, vp = v;
         const sp = s;
-        s = Math.min(P, s + sampleStep(T, x, y, Math.hypot(ev.gx, ev.gy), 1 / LPU, origin));
+        s = Math.min(P, s + sampleStep(T, x, y, Math.hypot(ev.gx, ev.gy), 1 / T.lpu, origin));
         [x, y] = pointAt(s);
         v = ev.val(x, y);
-        let ka = Math.floor(LPU * vp), kb = Math.floor(LPU * v);
+        let ka = Math.floor(T.lpu * vp), kb = Math.floor(T.lpu * v);
         if (ka === kb) continue;
         const lo = Math.min(ka, kb) + 1, hi = Math.max(ka, kb);
         for (let m = lo; m <= hi; m++) {
-            const level = m / LPU;
+            const level = m / T.lpu;
             const f = (t) => { const [qx, qy] = pointAt(t); return vp + ev.diff(qx, qy, xp, yp) - level; };
             const [qx, qy] = pointAt(bracketRoot(f, sp, s, vp - level, v - level));
             const th = new Float64Array(T.n);

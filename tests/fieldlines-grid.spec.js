@@ -97,6 +97,7 @@ async function gridLines(page, configs) {
             out.push({
                 name: cfg.name, width: W, height: H,
                 sources: model.sources.map(s => ({ x: s.x, y: s.y, charge: s.charge })),
+                lpu: model.linesPerUnitCharge,
                 lines: lines.map(l => ({ points: l.points, from: l.from, to: l.to, closed: !!l.closed })),
                 fieldAtEnds, tangency, medianMs: times[2],
             });
@@ -112,13 +113,13 @@ const fmt = (v, k = 1) => Number(v).toFixed(k);
 function checks(results, { tangentDeg = 3 } = {}) {
     const problems = [];
     for (const r of results) {
-        // 1. exactly 4|q| line ends on each source
+        // 1. exactly N|q| line ends on each source (N lines per unit charge)
         r.sources.forEach((s, i) => {
             let n = 0;
             for (const l of r.lines) for (const p of [l.points[0], l.points[l.points.length - 1]])
                 if (!l.closed && Math.hypot(p[0] - s.x, p[1] - s.y) <= 1) n++;
-            if (n !== Math.round(4 * Math.abs(s.charge)))
-                problems.push(`${r.name}: source ${i} (q = ${s.charge}) has ${n} line ends, expected ${4 * Math.abs(s.charge)}`);
+            if (n !== Math.round(r.lpu * Math.abs(s.charge)))
+                problems.push(`${r.name}: source ${i} (q = ${s.charge}) has ${n} line ends, expected ${r.lpu * Math.abs(s.charge)}`);
         });
         r.lines.forEach((l, li) => {
             const ends = [l.points[0], l.points[l.points.length - 1]];
@@ -195,7 +196,7 @@ function gauss(results, { seed = 5, polygons = 8, clearance = 15 } = {}) {
             made++;
             const q = r.sources.filter(s => inside([s.x, s.y], poly)).reduce((t, s) => t + s.charge, 0);
             const net = r.lines.reduce((t, l) => t + crossings(l.closed ? [...l.points, l.points[0]] : l.points, poly), 0);
-            if (net !== 4 * q) problems.push(`${r.name}: polygon around (${fmt(cx, 0)}, ${fmt(cy, 0)}) encloses charge ${q}: net crossings ${net}, expected ${4 * q}`);
+            if (net !== r.lpu * q) problems.push(`${r.name}: polygon around (${fmt(cx, 0)}, ${fmt(cy, 0)}) encloses charge ${q}: net crossings ${net}, expected ${r.lpu * q}`);
         }
     }
     return problems;
@@ -216,10 +217,10 @@ for (const [group, configs] of [['Fourier solver', fourier], ['dynamic solver', 
         let results;
         test.beforeEach(async ({ page }) => { results ??= await gridLines(page, configs); });
 
-        test(`4|q| line ends per charge; lines end on a charge, the edge, or where there is no field; tangent to the field (< ${TANGENT_DEG[group]} deg)`, () => {
+        test(`N|q| line ends per charge; lines end on a charge, the edge, or where there is no field; tangent to the field (< ${TANGENT_DEG[group]} deg)`, () => {
             report(checks(results, { tangentDeg: TANGENT_DEG[group] }), 'Grid field lines');
         });
-        test("Gauss's law: net crossings of random polygons = 4 x enclosed charge", () => {
+        test("Gauss's law: net crossings of random polygons = N x enclosed charge", () => {
             report(gauss(results), "Gauss's law");
         });
         test('time budget: median < 30 ms per configuration', () => {
@@ -347,8 +348,8 @@ test('dynamic solver: field lines outside the light cone do not move during a dr
                 return electricFieldLines(model, { width: W, height: H });
             };
             const before = lines();
-            // the local spacing of the field lines: psi changes by 1/4 between neighbours
-            const spacing = (x, y) => { const e = model.fieldAt(x, y); return 2 * Math.PI * model.K / (4 * Math.hypot(e.u, e.v)); };
+            // the local spacing of the field lines: psi changes by 1/N between neighbours
+            const spacing = (x, y) => { const e = model.fieldAt(x, y); return 2 * Math.PI * model.K / (model.linesPerUnitCharge * Math.hypot(e.u, e.v)); };
             // points of `a` farther than `r` from the moving charge's path, and their distance to the nearest segment of `b`
             const far = (a, b, r, u) => {
                 const [ex, ey] = [scenario.move[0] * u, scenario.move[1] * u];
@@ -395,9 +396,10 @@ test('dynamic solver: field lines outside the light cone do not move during a dr
     expect(problems).toEqual([]);
 });
 
-// As for the analytic models (decision D5): a symmetric +-3 pair has a field line along its axis,
-// for the Fourier solver and for the dynamic solver's starting state.
-test('grid solvers: a +-3 pair has a field line along its axis', async ({ page }) => {
+// As for the analytic models (ruleAxisLine): with the default levels (k + 1/2) / 5, a symmetric +-3
+// pair has a field line along its axis between the charges (psi = 3/2 there), but none running out
+// along the axis (psi = 0 there), for the Fourier solver and for the dynamic solver's starting state.
+test('grid solvers: a +-3 pair has a field line along its axis between the charges, and none outwards', async ({ page }) => {
     await page.goto('/tests/blank.html');
     const found = await page.evaluate(async () => {
         const wasm = await import('/maxwell/out/maxwell.js');
@@ -411,11 +413,15 @@ test('grid solvers: a +-3 pair has a field line along its axis', async ({ page }
             field.set_charges(charges);
             if (!dynamic) field.reset_fields();
             const lines = electricFieldLines(makeGridFieldModel({ field, charges, width: 668, height: 335 }), { width: 668, height: 335 });
-            out.push(lines.some(l => l.from === 0 && l.to === 1 && l.points.every(([, y]) => Math.abs(y - 167.5) < 0.5)));
+            const onAxis = l => l.points.every(([, y]) => Math.abs(y - 167.5) < 0.5);
+            out.push([
+                lines.some(l => l.from === 0 && l.to === 1 && onAxis(l)),
+                lines.some(l => l.from !== l.to && (l.from === 'infinity' || l.to === 'infinity') && onAxis(l)),
+            ]);
         }
         return out;
     });
-    expect(found).toEqual([true, true]);
+    expect(found).toEqual([[true, false], [true, false]]);
 });
 
 // The same through the real UI (ui.js's frame loop): drag the +3 charge of lecture 14's dynamic

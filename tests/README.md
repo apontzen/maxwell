@@ -116,21 +116,24 @@ solvers); see [issue #3](https://github.com/apontzen/maxwell/issues/3). Their ge
   It also checks that deliberately broken implementations are caught.
 - `fieldlines-rules.spec.js` applies the rules to every lecture example and to
   seeded random 3–4 charge configurations:
-  - exactly 4|q| line ends per charge;
+  - exactly N|q| line ends per charge, for N lines per unit charge (default 5; set per embed by
+    `linesPerUnitCharge` in its state, with the drawn levels of psi (k + f) / N, f =
+    `fieldLineOffset`, default 1/2);
   - lines end only on charges or at infinity, and are tangent to the field;
   - lines and contours are independent of the view;
   - lines move continuously under 1 px drags;
-  - rotation invariance and a line along the axis (decision D5);
+  - rotation invariance (decision D5), and straight lines along the axis of a pair of charges exactly
+    where a drawn level lies (with the defaults, none running outwards from a dipole);
   - equipotentials are perpendicular to field lines;
-  - net crossings of any closed loop equal 4 × the enclosed charge;
+  - net crossings of any closed loop equal N × the enclosed charge;
   - magnetic field lines are closed;
   - a time budget per frame.
 - `fieldlines-grid.spec.js` does the same for the grid solvers (`electrostatic_fourier`,
   `dynamic`; `gridfield.js` on top of the stream function computed in `maxwell/src/streamfn.rs`):
-  4|q| line ends per charge, lines end on a charge, on the edge of the canvas (the grid world ends
+  N|q| line ends per charge, lines end on a charge, on the edge of the canvas (the grid world ends
   there) or fade out where there is no field, tangency, Gauss's law, a time budget, and closed
   field lines radiated by a shaken dipole, which must not flicker (a loop present in the frames
-  before and after one must be in that one too); a line along the axis of a +-3 pair (as decision D5);
+  before and after one must be in that one too); a line along the axis of a +-3 pair between the charges and none outwards;
   and, for the dynamic solver, that field lines outside the light cone do not move while a charge
   is dragged (the drawn levels are chosen causally, see `maxwell/src/streamfn.rs`). The lecture examples, random configurations and a net
   charge are used for the Fourier solver; for the dynamic solver, lecture 14 before and after a

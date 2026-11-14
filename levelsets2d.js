@@ -21,7 +21,7 @@
 // equal charges) is snapped onto it and continued along the next outgoing branch, so that the
 // branches of the crossing are each drawn once and the result does not depend on rounding.
 
-import { SOFTEN, LINES_PER_UNIT_CHARGE } from './fieldmodels.js';
+import { SOFTEN, LINES_PER_UNIT_CHARGE, LEVEL_OFFSET } from './fieldmodels.js';
 
 const TWO_PI = 2 * Math.PI;
 
@@ -73,6 +73,10 @@ export function buildSystem(model, view) {
         rest: model.psiRest || null,
         region: model.region || null,
         maxArc: model.region ? GRID_MAX_ARC * 2 * (model.region.x1 - model.region.x0 + model.region.y1 - model.region.y0) : Infinity,
+        // electric field lines: lpu per unit charge, at the levels (k + levelOffset) / lpu of psi. The
+        // tracer works with psi + psiShift, psiShift = -levelOffset / lpu, at the levels k / lpu.
+        lpu: model.linesPerUnitCharge ?? LINES_PER_UNIT_CHARGE,
+        psiShift: -(model.levelOffset ?? LEVEL_OFFSET) / (model.linesPerUnitCharge ?? LINES_PER_UNIT_CHARGE),
     };
     return T;
 }
@@ -82,7 +86,7 @@ export function buildSystem(model, view) {
 // gx, gy only). The tangent followed in the "forward" direction is rot_-90(grad F) = (gy, -gx).
 // ---------------------------------------------------------------------------------------------
 
-/** Stream function psi (electric field lines); forward tangent = E (unsoftened). */
+/** Stream function psi + T.psiShift (electric field lines); forward tangent = E (unsoftened). */
 export class PsiEvaluator {
     constructor(T) {
         this.T = T;
@@ -137,7 +141,7 @@ export class PsiEvaluator {
         this.gx = -ey; this.gy = ex;
         let r = 0;
         if (T.rest) { T.rest.eval(x, y); this.gx += T.rest.gx; this.gy += T.rest.gy; r = T.rest.val; }
-        return s / TWO_PI + (T.ux * (y - T.myc) - T.uy * (x - T.mxc)) * this.c + r;
+        return s / TWO_PI + (T.ux * (y - T.myc) - T.uy * (x - T.mxc)) * this.c + r + T.psiShift;
     }
     /** The single-valued part of psi of a grid model (0 for the analytic models). */
     restAt(x, y) {
@@ -157,7 +161,7 @@ export class PsiEvaluator {
         const T = this.T;
         let s = 0;
         for (let i = 0; i < T.n; i++) s += T.qs[i] * Math.atan2(y - T.ys[i], x - T.xs[i]);
-        return s / TWO_PI + (T.ux * (y - T.myc) - T.uy * (x - T.mxc)) * this.c + this.restAt(x, y);
+        return s / TWO_PI + (T.ux * (y - T.myc) - T.uy * (x - T.mxc)) * this.c + this.restAt(x, y) + T.psiShift;
     }
 }
 
@@ -371,7 +375,7 @@ export function gridStagnationPoints(T, ev) {
     // Dead zones: where |grad psi| is negligible within +-DEAD_WINDOW corners, psi is just noise
     // (e.g. where radiation has not arrived yet and the static field cancels). Contours there are
     // meaningless: nothing is seeded there and lines stop on entering one.
-    const gmin = DEAD_LEVELS_PER_DIAGONAL / (LINES_PER_UNIT_CHARGE * T.diag);
+    const gmin = DEAD_LEVELS_PER_DIAGONAL / (T.lpu * T.diag);
     const live = new Uint8Array(m * m);
     for (let p = 0; p < m * m; p++) live[p] = gx[p] * gx[p] + gy[p] * gy[p] >= gmin * gmin ? 1 : 0;
     const dead = new Uint8Array(m * m);

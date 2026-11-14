@@ -13,7 +13,8 @@ import {
 } from './fieldline-checks.js';
 import { rng, rotateConfig, totalCharge } from './fieldline-configs.js';
 
-const LINES_PER_UNIT = 4; // decision D4; env.models.LINES_PER_UNIT_CHARGE is checked in the first rule
+/** Field lines per unit charge of an electric model (decision D4, revised; see fieldmodels.js) */
+const linesPerUnit = (env, m) => m.linesPerUnitCharge ?? env.models.LINES_PER_UNIT_CHARGE;
 
 export const viewOf = cfg => ({ width: cfg.width, height: cfg.height });
 
@@ -42,17 +43,15 @@ function traceElectric(env, cfg, view, problems) {
 
 // ---------------------------------------------------------------------------
 
-/** Each source of charge q has exactly 4|q| line ends attached (within 1 px). */
+/** Each source of charge q has exactly N|q| line ends attached (within 1 px), N lines per unit charge. */
 export function ruleExactCounts(env, configs) {
     const problems = [];
-    if (env.models.LINES_PER_UNIT_CHARGE !== LINES_PER_UNIT)
-        problems.push(`LINES_PER_UNIT_CHARGE is ${env.models.LINES_PER_UNIT_CHARGE}, tests assume ${LINES_PER_UNIT} (D4)`);
     for (const cfg of configs) {
         const { m, lines } = traceElectric(env, cfg, viewOf(cfg), problems);
         if (!lines) continue;
         const counts = countAttachedEnds(lines, m.sources, 1);
         m.sources.forEach((s, i) => {
-            const expected = Math.round(LINES_PER_UNIT * Math.abs(s.charge));
+            const expected = Math.round(linesPerUnit(env, m) * Math.abs(s.charge));
             if (counts[i] !== expected)
                 problems.push(`${cfg.name}: source ${i} (q=${s.charge} at ${fmt(s.x)},${fmt(s.y)}) has ${counts[i]} attached line ends, expected ${expected}`);
         });
@@ -207,33 +206,56 @@ export function ruleRotationInvariance(env, configs, { tolDeg = 0.5 } = {}) {
     return problems;
 }
 
-/** A +2/-2 horizontal pair has a straight line along the axis; a +2/+2 pair has outward axis lines. */
+/**
+ * Straight lines along the axis of a pair of charges on a horizontal line exist exactly where the
+ * drawn levels (k + f) / N of psi fall (decisions D4, D5 as revised). On the axis psi is known: for
+ * charges q0 (left) and q1 (right), psi = 0 to the right of both, q1 / 2 between them and
+ * (q0 + q1) / 2 to the left of both (mod |q0|, |q1|). (Between like charges the axis runs into a
+ * saddle, so only unlike pairs are checked there.) So, e.g., with the defaults N = 5, f = 1/2 a
+ * +-2 pair has no straight line along its axis at all, and a +-1 pair has the segment between the
+ * charges only; with N = 4, f = 0 a +-2 pair has both, and a +2 +2 pair has the lines outwards.
+ * Each configuration in `axis` is {name, charges: [left, right], ...} (any number of them).
+ */
 export function ruleAxisLine(env, axis, { tolDeg = 0.5 } = {}) {
     const problems = [];
-    const check = (cfg, plusIndex, wantAngle, what, straightTo = null) => {
+    for (const cfg of Object.values(axis)) {
         const { m, lines } = traceElectric(env, cfg, viewOf(cfg), problems);
-        if (!lines) return;
-        const S = m.sources[plusIndex];
-        const ends = attachedEnds(lines, m.sources, 1)[plusIndex];
-        const found = ends.map(e => ({ ...e, ang: attachmentAngle(lines[e.line].points, e.end, S, 15) }))
-            .filter(e => Math.abs(angleDiff(e.ang, wantAngle)) <= tolDeg * DEG);
-        if (found.length === 0) {
-            problems.push(`${cfg.name}: no line leaves source ${plusIndex} ${what} (wanted attachment angle ${fmt(deg(wantAngle))} deg +- ${tolDeg}); angles are ${ends.map(e => fmt(deg(attachmentAngle(lines[e.line].points, e.end, S, 15)))).join(' ')}`);
-            return;
+        if (!lines) continue;
+        const N = linesPerUnit(env, m), f = m.levelOffset ?? env.models.LEVEL_OFFSET;
+        const [L, R] = m.sources;
+        const Q = [Math.abs(L.charge), Math.abs(R.charge)];
+        // is psi a drawn level (mod the charges)? N psi - f = an integer combination of N q
+        const drawn = psi => {
+            for (let a = -4; a <= 4; a++) for (let b = -4; b <= 4; b++) {
+                const v = N * (psi + a * Q[0] + b * Q[1]) - f;
+                if (Math.abs(v - Math.round(v)) < 1e-9) return true;
+            }
+            return false;
+        };
+        const ends = attachedEnds(lines, m.sources, 1);
+        // [source index, direction (angle), psi on that part of the axis, description, straight to]
+        const cases = [
+            [1, 0, 0, 'outwards to the right', null],
+            [0, Math.PI, (L.charge + R.charge) / 2, 'outwards to the left', null],
+            ...(L.charge * R.charge < 0 ? [[0, 0, R.charge / 2, 'towards the other charge', [R.x, R.y]]] : []),
+        ];
+        for (const [i, dir, psi, what, straightTo] of cases) {
+            const S = m.sources[i];
+            const found = ends[i].map(e => ({ ...e, ang: attachmentAngle(lines[e.line].points, e.end, S, 15) }))
+                .filter(e => Math.abs(angleDiff(e.ang, dir)) <= tolDeg * DEG);
+            const want = drawn(psi);
+            if (want && found.length === 0) {
+                problems.push(`${cfg.name} (N = ${N}, f = ${f}): no line leaves source ${i} ${what} (psi = ${psi} there is a drawn level); angles are ${ends[i].map(e => fmt(deg(attachmentAngle(lines[e.line].points, e.end, S, 15)))).join(' ')}`);
+            } else if (!want && found.length > 0) {
+                problems.push(`${cfg.name} (N = ${N}, f = ${f}): a line leaves source ${i} ${what}, although psi = ${psi} there is not a drawn level`);
+            } else if (want && straightTo) {
+                const axisLine = [[S.x, S.y], straightTo];
+                const l = lines[found[0].line];
+                const dev = Math.max(...l.points.map(p => pointPolylineDistance(p, axisLine)));
+                if (dev > 0.5) problems.push(`${cfg.name}: the axis line ${what} deviates from the axis by ${fmt(dev, 2)} px (limit 0.5)`);
+            }
         }
-        if (straightTo) {
-            const axisLine = [[S.x, S.y], straightTo];
-            const l = lines[found[0].line];
-            const dev = Math.max(...l.points.map(p => pointPolylineDistance(p, axisLine)));
-            if (dev > 0.5) problems.push(`${cfg.name}: the axis line ${what} deviates from the axis by ${fmt(dev, 2)} px (limit 0.5)`);
-        }
-    };
-    const u = axis.unlike, l = axis.like;
-    // unlike: + at index 0, - at index 1 on the right: towards the minus charge is angle 0 (+x)
-    check(u, 0, 0, 'towards the negative charge', [u.charges[1].x, u.charges[1].y]);
-    // like: charge 0 is on the left, so outwards is +pi; charge 1 outwards is 0
-    check(l, 0, Math.PI, 'outwards along the axis');
-    check(l, 1, 0, 'outwards along the axis');
+    }
     return problems;
 }
 
@@ -267,7 +289,7 @@ export function rulePerpendicularContours(env, configs, { tolDeg = 6, minCrossin
     return problems;
 }
 
-/** Random closed polygons, avoiding sources by >= 15 px, have net signed crossings = 4 x enclosed charge. */
+/** Random closed polygons, avoiding sources by >= 15 px, have net signed crossings = N x enclosed charge. */
 export function ruleGauss(env, configs, { seed = 99, polygonsPerConfig = 8, clearance = 15 } = {}) {
     const problems = [];
     configs.forEach((cfg, ci) => {
@@ -293,7 +315,7 @@ export function ruleGauss(env, configs, { seed = 99, polygonsPerConfig = 8, clea
             const q = enclosedCharge(m.sources, poly);
             if (q !== 0) enclosingSome++;
             const got = netCrossings(lines, poly);
-            const expected = LINES_PER_UNIT * q;
+            const expected = linesPerUnit(env, m) * q;
             if (got.net !== expected)
                 problems.push(`${cfg.name}: polygon ${JSON.stringify(poly.map(p => p.map(v => Math.round(v))))} encloses charge ${q}: net crossings ${got.net} (out ${got.out}, in ${got.in}), expected ${expected}`);
         }

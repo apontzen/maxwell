@@ -74,14 +74,18 @@ export function effectiveSolver(name, plotType) {
  *
  * @param {string} solver  an effective (canonical) solver name
  * @param {object} opts    {field: FieldConfiguration (WASM), charges (incl. test charges),
- *                          uniformX, uniformY, width, height, perCharge}
+ *                          uniformX, uniformY, width, height, perCharge,
+ *                          fieldLines: {linesPerUnitCharge, levelOffset} (each optional; electric
+ *                          field lines, see fieldmodels.js)}
  * @returns {{solver, info, isMagnetic, dimension, perCharge, field, model2D,
  *            fieldToBuffer(f, x, y, buf), fieldPerChargeToBuffer(f, x, y, buf),
  *            forceOn(x, y, q), forcesOnSources()}}
  *   fieldToBuffer / fieldPerChargeToBuffer take the WASM-style (field, x, y, buffer) arguments;
  *   model2D is the analytic model from fieldmodels.js for 2D solvers, otherwise null.
  */
-export function makeRenderModel(solver, { field, charges, uniformX, uniformY, width, height, perCharge }) {
+export function makeRenderModel(solver, { field, charges, uniformX, uniformY, width, height, perCharge, fieldLines = {} }) {
+    // only the options given, so that the models' defaults apply to the others
+    const lineOpts = Object.fromEntries(Object.entries(fieldLines).filter(([, v]) => v !== undefined && v !== null));
     const info = SOLVERS[solver];
     const base = {
         solver, info, isMagnetic: info.magnetic, field, model2D: null,
@@ -90,7 +94,7 @@ export function makeRenderModel(solver, { field, charges, uniformX, uniformY, wi
 
     if (info.type === '2d') {
         const model2D = makeFieldModel(info.magnetic ? WIRE_KIND : LINE_CHARGE_KIND,
-            { charges, uniformX, uniformY, width, height });
+            { charges, uniformX, uniformY, width, height, ...lineOpts });
         return {
             ...base, dimension: 2, model2D,
             fieldToBuffer: model2D.fieldToBuffer,
@@ -118,7 +122,7 @@ export function makeRenderModel(solver, { field, charges, uniformX, uniformY, wi
         // built lazily: only field-line mode needs it
         get model2D() {
             if (!this._grid) {
-                this._grid = makeGridFieldModel({ field, charges, uniformX, uniformY, width, height });
+                this._grid = makeGridFieldModel({ field, charges, uniformX, uniformY, width, height, ...lineOpts });
                 // the dynamic solver's lines evolve from frame to frame: keep their arrows in place
                 this._grid.stickyArrows = !!info.dynamic;
             }
