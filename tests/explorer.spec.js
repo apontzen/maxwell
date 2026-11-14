@@ -200,6 +200,35 @@ test.describe('explorer (index.html)', () => {
         });
     }
 
+    for (const solver of ['dynamic', 'electrostatic_direct']) {
+        test(`each animation frame redraws once (${solver}), however many clicks and drags came before`, async ({ page }) => {
+            // Count the page's requestAnimationFrame callbacks per frame: all callbacks of one frame
+            // receive the same timestamp. (Earlier, every click on a charge or on empty canvas started
+            // another animation loop in dynamic mode, so N interactions meant N redraws per frame.)
+            await page.addInitScript(() => {
+                const raf = window.requestAnimationFrame.bind(window);
+                window.__rafTimes = [];
+                window.requestAnimationFrame = cb => raf(t => { window.__rafTimes.push(t); cb(t); });
+            });
+            await openExplorer(page, { ...TWO_CHARGES, solver });
+            let at = { x: 0.3, y: 0.5 };
+            for (let k = 0; k < 5; k++) {
+                const to = { x: 0.3 + 0.02 * ((k % 2) ? -1 : 1), y: 0.5 + 0.03 * k };
+                await drag(page, at, to, 4);
+                at = to;
+                const empty = await canvasPoint(page, { x: 0.9, y: 0.1 });
+                await page.mouse.click(empty.x, empty.y);   // deselects (redraws)
+            }
+            await page.evaluate(() => { window.__rafTimes.length = 0; });
+            await advance(page, 500);
+            const perFrame = {};
+            for (const t of await page.evaluate(() => window.__rafTimes)) perFrame[t] = (perFrame[t] || 0) + 1;
+            const counts = Object.values(perFrame);
+            if (solver === 'dynamic') expect(counts.length, 'the dynamic solver keeps animating').toBeGreaterThan(10);
+            expect(Math.max(0, ...counts), 'callbacks in one animation frame').toBeLessThanOrEqual(1);
+        });
+    }
+
     test('button labels say "Current" for the magnetostatic solvers', async ({ page }) => {
         await openExplorer(page, TWO_CHARGES);
         await page.locator('#solver').selectOption('magnetostatic_wire');

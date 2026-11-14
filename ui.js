@@ -105,11 +105,15 @@ export async function main(params) {
     }
 
     
-    function animationIsRunning() {
-        return animation_request_id !== null && dynamic;
+    // At most one animation frame is ever pending. drawVectorField() is also called directly (e.g. on
+    // clicking a charge), and it calls continueAnimation(): without this guard, every such call
+    // started another animation loop in dynamic mode, all of which redrew every frame.
+    function framePending() {
+        return animation_request_id !== null;
     }
 
     function continueAnimation() {
+        if(framePending()) return;
         if(dynamic && last_interaction_time !== null && (performance.now() - last_interaction_time) < DYNAMIC_RUNTIME_MS) {
             animation_request_id = window.requestAnimationFrame(tickField);
         }
@@ -118,7 +122,7 @@ export async function main(params) {
     function postUserInteraction() {
         last_interaction_time = performance.now();
         saveState();
-        if(!animationIsRunning())
+        if(!framePending())
             animation_request_id = window.requestAnimationFrame(tickField);
     }
 
