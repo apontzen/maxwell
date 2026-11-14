@@ -377,16 +377,19 @@ export async function main(params) {
     function tickField(time_now) {
         animation_request_id = null;
 
-        let dt = 0;
-        if (last_time === null) {
-            last_time = time_now;
-        } else {
-            dt = time_now - last_time;
-        }
+        // The first frame of an animation advances by one nominal frame, so that the field catches
+        // up with charges that have moved since the last frame (see below)
+        let dt = last_time === null ? 1000 / 60 : time_now - last_time;
 
         dt /= 5; // convert from ms to internal time units
 
         const dx = rect.width / cic_resolution;
+
+        // Give the solver the charges' current positions before ticking, so that by the time this
+        // frame is drawn the field's charges are where the charges are drawn. (Otherwise the field
+        // lags by a frame, and the field lines, whose point-charge part is at the drawn positions,
+        // jitter while a charge is dragged.)
+        field.set_charges(charges.filter(c => !c.isTestCharge));
 
         // Try to get forward in time by dt, but abandon if it takes too long (more than 20ms)
         const performance_time_start = performance.now();

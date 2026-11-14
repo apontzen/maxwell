@@ -117,7 +117,12 @@ export function makeRenderModel(solver, { field, charges, uniformX, uniformY, wi
         ...base, dimension: 2, perCharge: false,
         // built lazily: only field-line mode needs it
         get model2D() {
-            return this._grid ??= makeGridFieldModel({ field, charges, uniformX, uniformY, width, height });
+            if (!this._grid) {
+                this._grid = makeGridFieldModel({ field, charges, uniformX, uniformY, width, height });
+                // the dynamic solver's lines evolve from frame to frame: keep their arrows in place
+                this._grid.stickyArrows = !!info.dynamic;
+            }
+            return this._grid;
         },
         fieldToBuffer: compute_electric_field_dynamic_to_buffer,
         fieldPerChargeToBuffer: compute_electric_field_dynamic_to_buffer,

@@ -329,3 +329,41 @@ test('grid solvers: a +-3 pair has a field line along its axis', async ({ page }
     });
     expect(found).toEqual([true, true]);
 });
+
+// The same through the real UI (ui.js's frame loop): drag the +3 charge of lecture 14's dynamic
+// example with field lines shown; in the left third of the canvas (the -3 charge, at least 200 px
+// beyond the light front while the drag lasts) lines may only shift by a fraction of a pixel: no
+// pixel's RGBA may change by more than 128 in total (a line moving by a whole pixel changes pixels
+// by ~255). This caught the field being ticked with the previous frame's positions, which made the
+// far field lines jitter by a pixel or more while a charge was dragged.
+test('dynamic solver in the UI: far field lines stay still while a charge is dragged', async ({ page }) => {
+    const { examples } = await import('./helpers.js');
+    const ex = examples.find(e => e.id === 'lecture14-2');
+    const state = { ...ex.state, plotType: 'fieldline' };
+    await page.clock.install({ time: new Date('2025-01-01T00:00:00Z') });
+    await page.clock.pauseAt(new Date('2025-01-01T00:00:01Z'));
+    await page.goto('/tests/harness.html?attrs=' + encodeURIComponent(JSON.stringify({ meme: JSON.stringify(state) })));
+    for (let i = 0; i < 40; i++) { await page.clock.runFor(48); await page.waitForTimeout(10); }
+    const canvas = page.locator('meme-embed canvas').first();
+    const leftThird = () => canvas.evaluate(c => Array.from(c.getContext('2d').getImageData(0, 0, Math.floor(c.width / 3), c.height).data));
+    const before = await leftThird();
+    const box = await canvas.boundingBox();
+    const a = { x: box.x + 0.7 * box.width, y: box.y + 0.5 * box.height };
+    await page.mouse.move(Math.round(a.x), Math.round(a.y));
+    await page.mouse.down();
+    const jumps = [];
+    for (let i = 1; i <= 18; i++) {   // 300 ms, 60 x 20 canvas px, uneven steps as from a real mouse
+        const u = (i + 0.4 * Math.sin(i)) / 18.4;
+        await page.mouse.move(Math.round(a.x + 60 * u * box.width / 668), Math.round(a.y + 20 * u * box.height / 335));
+        await page.clock.runFor(16.7);
+        const now = await leftThird();
+        let worst = 0;
+        for (let k = 0; k < now.length; k += 4) {
+            const d = Math.abs(now[k] - before[k]) + Math.abs(now[k + 1] - before[k + 1]) + Math.abs(now[k + 2] - before[k + 2]) + Math.abs(now[k + 3] - before[k + 3]);
+            if (d > worst) worst = d;
+        }
+        if (worst > 128) jumps.push(`frame ${i}: a pixel changed by ${worst}`);
+    }
+    await page.mouse.up();
+    expect(jumps).toEqual([]);
+});
