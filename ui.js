@@ -383,8 +383,6 @@ export async function main(params) {
 
         dt /= 5; // convert from ms to internal time units
 
-        const dx = rect.width / cic_resolution;
-
         // Give the solver the charges' current positions before ticking, so that by the time this
         // frame is drawn the field's charges are where the charges are drawn. (Otherwise the field
         // lags by a frame, and the field lines, whose point-charge part is at the drawn positions,
@@ -396,7 +394,7 @@ export async function main(params) {
         const max_time_ms = 20.0;
 
         while (dt > 0.0 && performance.now() - performance_time_start < max_time_ms) {
-            const step = Math.min(0.1 * dx , dt);
+            const step = Math.min(field.stable_timestep(), dt);
             field.tick(step);
             dt -= step;
         }

@@ -44,15 +44,19 @@ impl Stencils {
         self.del_squared_inv = Some(del_squared_inv);
     }
 
-    /// The gradient (forward differences) of del^-2 rho: (d/dx, d/dy) of the periodic solution of
-    /// del^2 phi = rho with the k = 0 mode dropped. One FFT pair for both components.
-    pub fn grad_del_squared_inv(&self, rho: &Array2<f64>) -> (Array2<f64>, Array2<f64>) {
+    /// del^-2 rho on the periodic grid (k = 0 mode dropped)
+    pub fn del_squared_inv(&self, rho: &Array2<f64>) -> Array2<f64> {
         let mut phi = rho.clone();
         self.apply_fourier_stencil(&mut phi, self.del_squared_inv.as_ref().unwrap());
-        let mut gx = Array2::<f64>::zeros(rho.dim());
-        let mut gy = Array2::<f64>::zeros(rho.dim());
-        self.apply_grad(&phi, &mut gx, StencilType::GradX, DifferenceType::Forward);
-        self.apply_grad(&phi, &mut gy, StencilType::GradY, DifferenceType::Forward);
+        phi
+    }
+
+    /// The forward-difference gradient of phi (as used for the static field)
+    pub fn grad_forward(&self, phi: &Array2<f64>) -> (Array2<f64>, Array2<f64>) {
+        let mut gx = Array2::<f64>::zeros(phi.dim());
+        let mut gy = Array2::<f64>::zeros(phi.dim());
+        self.apply_grad(phi, &mut gx, StencilType::GradX, DifferenceType::Forward);
+        self.apply_grad(phi, &mut gy, StencilType::GradY, DifferenceType::Forward);
         (gx, gy)
     }
 

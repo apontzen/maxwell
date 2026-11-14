@@ -138,8 +138,9 @@ solvers); see [issue #3](https://github.com/apontzen/maxwell/issues/3). Their ge
   solver, and that it reproduces the grid's face fluxes exactly for pure radiation, closely
   (outside the smeared charges) for a static field, and continuously as a charge crosses cells.
   They also check the dynamic solver: static charges keep their field exactly, Gauss's law holds
-  during sub-cell drags, the field settles to the static one after a drag, and radiation leaves
-  through the absorbing layer; and the causal choice of field lines: psi outside the light cone of
+  during sub-cell drags, the field settles to the static one after a drag, radiation leaves
+  through the absorbing layer (`maxwell/src/absorber.rs`), and the canvas behaves like vacuum
+  (compared with the same simulation on a grid 5x larger); and the causal choice of field lines: psi outside the light cone of
   a spinning dipole is unchanged, and settled lines match the static ones.
 - `solvers.spec.js` checks the solver registry (`solvers.js`): which model is used in
   each mode, the deprecated alias, and that forces and fields come from the same 2D model.

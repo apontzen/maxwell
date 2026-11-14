@@ -13,6 +13,7 @@ mod fourier;
 mod geometry;
 mod contours;
 mod streamfn;
+mod absorber;
 
 const FIELD_SCALING: f64 = 20000.0;
 const SOFTEN: f64 = 5.0;
@@ -69,35 +70,18 @@ pub struct FieldConfiguration {
     elec_uniform_x: f64,
     elec_uniform_y: f64,
     stream_solver: Option<streamfn::StreamFunctionSolver>,
-    /// running time-average of E, used by the absorbing layer (see tick)
-    elec_avg_x: Option<Array2<f64>>,
-    elec_avg_y: Option<Array2<f64>>,
-    ticks_since_divergence_cleaning: usize,
-    divergence_dirty: bool,
+    /// the absorbing boundary layer (absorber.rs)
+    absorber: Option<absorber::Absorber>,
     currents_nonzero: bool,
-    /// <E> after the last tick, and the corrections of its changes still to be applied, as
-    /// (simulation time of the change, uniform change of E to apply) (see tick)
-    mean_field: (f64, f64),
-    pending_mean_corrections: std::collections::VecDeque<(f64, f64, f64)>,
     simulation_time: f64,
-    // For the causal choice of field lines (streamfn.rs): time integrals of B_z and of the mean
-    // current since psi was last computed, the time since then and since a charge last moved, and psi
-    // at that time.
+    // For the causal choice of field lines (streamfn.rs): the time integral of B_z since psi was
+    // last computed, the time since then and since a charge last moved, and psi at that time.
     b_integral: Option<Array2<f64>>,
-    /// (uniform changes of E applied since psi was last computed)
-    mean_current_integral: (f64, f64),
     time_since_stream_function: f64,
     time_since_motion: f64,
     gauge_history: Option<streamfn::GaugeHistory>,
 }
 
-/// Damping rates in the absorbing layer ramp linearly from 0 at its inner edge to this (per unit time).
-const PML_MAX_SIGMA: f64 = 0.25;
-/// Time constant of the running average of E in the absorbing layer: only E - <E> is damped, so
-/// that static fields are not (internal time units; 200 = 1 s).
-const PML_AVERAGE_TIME: f64 = 200.0;
-/// Remove any violation of Gauss's law (created by the absorbing layer) every this many ticks.
-const DIVERGENCE_CLEANING_TICKS: usize = 20;
 
 pub fn evaluate_grid(field: &Array2<f64>, x: isize, y: isize) -> f64 {
     // Evaluate the field at the specified grid cell, or return 0 if x>=nx, y>=ny, x<0 or y<0
@@ -163,7 +147,13 @@ pub fn evaluate_grid_interpolated(field_config: &FieldConfiguration, grid: &Arra
 impl FieldConfiguration {
     #[wasm_bindgen(constructor)]
     pub fn new(x_max: f64, y_max: f64, nx: usize, ny: usize) -> FieldConfiguration {
-        let geometry = Geometry{x_max: x_max, y_max: y_max, nx: nx, ny: ny, nboundary: nx/8};
+        // the physical region has (nx - 2 nx/8) x (ny - 2 nx/8) cells, surrounded by the absorbing layer
+        FieldConfiguration::with_geometry(absorber::padded_geometry(x_max, y_max, nx, ny))
+    }
+}
+
+impl FieldConfiguration {
+    pub(crate) fn with_geometry(geometry: Geometry) -> FieldConfiguration {
         let geometry_clone = geometry.clone();
         let cell_area = geometry.delta_x() * geometry.delta_y();
         let charge_normalization = 4000.0 / cell_area;
@@ -171,10 +161,14 @@ impl FieldConfiguration {
             cic_grid: None, elec_x: None, elec_y: None, mag_z: None, current_x: None, current_y: None,
             stencils: stencil::Stencils::new(geometry_clone), charge_normalization, 
             elec_uniform_x: 0.0, elec_uniform_y: 0.0, stream_solver: None,
-            elec_avg_x: None, elec_avg_y: None, ticks_since_divergence_cleaning: 0, divergence_dirty: false, currents_nonzero: false,
-            mean_field: (0.0, 0.0), pending_mean_corrections: std::collections::VecDeque::new(), simulation_time: 0.0, b_integral: None, mean_current_integral: (0.0, 0.0),
+            absorber: None, currents_nonzero: false,
+            simulation_time: 0.0, b_integral: None,
             time_since_stream_function: 0.0, time_since_motion: f64::INFINITY, gauge_history: None }
     }
+}
+
+#[wasm_bindgen]
+impl FieldConfiguration {
 
     pub fn set_charges(&mut self, charges: JsValue) {
         self.charges = match from_value(charges) {
@@ -184,6 +178,13 @@ impl FieldConfiguration {
                 vec![]
             }
         };
+    }
+
+    /// The time step to use for tick(): 0.3 of the Courant stability limit of the grid (larger steps
+    /// make the absorbing layer reflect more)
+    pub fn stable_timestep(&self) -> f64 {
+        let (dx, dy) = (self.geometry.delta_x(), self.geometry.delta_y());
+        0.3 / (1.0 / (dx * dx) + 1.0 / (dy * dy)).sqrt()
     }
 
     pub fn set_uniform_field(&mut self, x: f64, y: f64) {
@@ -202,8 +203,7 @@ impl FieldConfiguration {
         self.mag_z = None;
         self.current_x = None;
         self.current_y = None;
-        self.elec_avg_x = None;
-        self.elec_avg_y = None;
+        self.absorber = None;
         self.gauge_history = None;
     }
 
@@ -225,6 +225,11 @@ impl FieldConfiguration {
         self.cic_grid = Some(grid);
     }
 
+    /// The charges as deposited on the grid: (x, y, charge * normalisation)
+    fn deposit(&self) -> Vec<(f64, f64, f64)> {
+        self.charges.iter().map(|c| (c.x, c.y, c.charge * self.charge_normalization)).collect()
+    }
+
     fn in_physical_region(&self, charge: &Charge) -> bool {
         charge.x >= 0.0 && charge.x <= self.geometry.x_max && charge.y >= 0.0 && charge.y <= self.geometry.y_max
     }
@@ -232,26 +237,20 @@ impl FieldConfiguration {
     pub fn initialize_on_constraints(&mut self) {
         self.make_cic_grid();
 
-        let (elec_x, elec_y) = self.stencils.grad_del_squared_inv(self.cic_grid.as_ref().unwrap());
-        self.elec_avg_x = Some(elec_x.clone());
-        self.elec_avg_y = Some(elec_y.clone());
+        let potential = self.stencils.del_squared_inv(self.cic_grid.as_ref().unwrap());
+        let (elec_x, elec_y) = self.stencils.grad_forward(&potential);
+        let deposit = self.deposit();
+        self.absorber = Some(absorber::Absorber::new(&self.geometry, &self.stencils, &deposit, &potential, self.simulation_time));
         self.elec_y = Some(elec_y);
         self.elec_x = Some(elec_x);
-        self.ticks_since_divergence_cleaning = 0;
         self.mag_z = Some(Array2::<f64>::zeros((self.geometry.nx, self.geometry.ny)));
 
         self.current_x = Some(Array2::<f64>::zeros((self.geometry.nx, self.geometry.ny)));
         self.current_y = Some(Array2::<f64>::zeros((self.geometry.nx, self.geometry.ny)));
         self.currents_nonzero = false;
-        self.pending_mean_corrections.clear();
-        {
-            let n = (self.geometry.nx * self.geometry.ny) as f64;
-            self.mean_field = (self.elec_x.as_ref().unwrap().sum() / n, self.elec_y.as_ref().unwrap().sum() / n);
-        }
 
         // a new static field: the field lines start from the canonical choice
         self.b_integral = Some(Array2::<f64>::zeros((self.geometry.nx, self.geometry.ny)));
-        self.mean_current_integral = (0.0, 0.0);
         self.time_since_stream_function = 0.0;
         self.time_since_motion = f64::INFINITY;
         self.gauge_history = None;
@@ -360,149 +359,100 @@ impl FieldConfiguration {
     pub fn tick(&mut self, delta_t: f64) {
         self.ensure_initialized();
 
-        // compute the currents from any motion in the charges. 
+        // compute the currents from any motion in the charges
         self.make_currents(delta_t);
 
         // save the charges so we can compute the currents next time
         self.charges_at_last_tick = self.charges.clone();
 
-        // Now we are ready to evolve the fields by one timestep. Note that the B and density 
-        // fields are half a tick behind and half a grid cell to the left of the E and j fields.
-        let elec_x = self.elec_x.as_mut().unwrap();
-        let elec_y = self.elec_y.as_mut().unwrap();
-        let mag_z = self.mag_z.as_mut().unwrap();
-        let avg_x = self.elec_avg_x.as_mut().unwrap();
-        let avg_y = self.elec_avg_y.as_mut().unwrap();
-        let current_x = self.current_x.as_ref().unwrap();
-        let current_y = self.current_y.as_ref().unwrap();
+        if delta_t > 2.0 * self.stable_timestep() {
+            console::log_1(&(format!("Warning: timestep {} exceeds the Courant limit {}", delta_t, 2.0 * self.stable_timestep())).into());
+        }
 
-        if (delta_t / self.geometry.delta_x()).abs() > 0.1 {
-            console::log_1(&(format!("Warning: timestep is large compared to grid cell size: {}", delta_t / self.geometry.delta_x())).into());
-        } 
-
+        // the absorbing layer's static target (absorber.rs)
+        self.simulation_time += delta_t;
+        let deposit = self.deposit();
+        let ab = self.absorber.as_mut().unwrap();
+        ab.advance(&self.geometry, &self.stencils, self.simulation_time, &deposit);
 
         // The updates below are written over flat slices (index i * ny + j, periodic wrap at the
-        // edges) for speed; they are the same as the stencils' forward/backward differences.
+        // edges) for speed. B_z is half a tick behind E; it is advanced with forward differences of E,
+        // then E a whole tick with backward differences of B_z, which preserves div E = rho.
         let (nx, ny) = (self.geometry.nx, self.geometry.ny);
         let (dx_inv, dy_inv) = (1.0 / self.geometry.delta_x(), 1.0 / self.geometry.delta_y());
-        // damping profiles of the absorbing layer (sigma_x depends on i only, sigma_y on j only)
-        let profile = |n: usize| -> Vec<f64> {
-            let w = self.geometry.nboundary;
-            (0..n).map(|k| if k < w || k >= n - w { (1.0 - k.min(n - k - 1) as f64 / w as f64) * PML_MAX_SIGMA } else { 0.0 }).collect()
+        // semi-implicit (Crank-Nicolson) damping over a tick: f = (1 - s dt/2) / (1 + s dt/2), g = 1 / (1 + s dt/2)
+        let factors = |sig: &Vec<f64>| -> (Vec<f64>, Vec<f64>) {
+            (sig.iter().map(|s| (1.0 - 0.5 * s * delta_t) / (1.0 + 0.5 * s * delta_t)).collect(),
+             sig.iter().map(|s| 1.0 / (1.0 + 0.5 * s * delta_t)).collect())
         };
-        let (sig_x, sig_y) = (profile(nx), profile(ny));
-        let ex = elec_x.as_slice_mut().unwrap();
-        let ey = elec_y.as_slice_mut().unwrap();
-        let bz = mag_z.as_slice_mut().unwrap();
-        let ax = avg_x.as_slice_mut().unwrap();
-        let ay = avg_y.as_slice_mut().unwrap();
-        let jx = current_x.as_slice().unwrap();
-        let jy = current_y.as_slice().unwrap();
+        let (fx, gx) = factors(&ab.sigma_x);
+        let (fy, gy) = factors(&ab.sigma_y);
+        let (fxh, gxh) = factors(&ab.sigma_x_half);
+        let (fyh, gyh) = factors(&ab.sigma_y_half);
+        // cells touched by the layer (in either half-position)
+        let in_x: Vec<bool> = (0..nx).map(|i| ab.sigma_x[i] > 0.0 || ab.sigma_x_half[i] > 0.0).collect();
+        let in_y: Vec<bool> = (0..ny).map(|j| ab.sigma_y[j] > 0.0 || ab.sigma_y_half[j] > 0.0).collect();
+        let ex = self.elec_x.as_mut().unwrap().as_slice_mut().unwrap();
+        let ey = self.elec_y.as_mut().unwrap().as_slice_mut().unwrap();
+        let bz = self.mag_z.as_mut().unwrap().as_slice_mut().unwrap();
+        let bzx = ab.bzx.as_slice_mut().unwrap();
+        let bzy = ab.bzy.as_slice_mut().unwrap();
+        let tx = ab.target_x.as_slice().unwrap();
+        let ty = ab.target_y.as_slice().unwrap();
+        let jx = self.current_x.as_ref().unwrap().as_slice().unwrap();
+        let jy = self.current_y.as_ref().unwrap().as_slice().unwrap();
         let ib = self.b_integral.as_mut().unwrap().as_slice_mut().unwrap();
 
-        // Evolve Bz first, to get it from half a tick behind to half a tick ahead of E:
-        // dB_z/dt = dE_x/dy - dE_y/dx (forward differences), then damp B in the absorbing layer
-        // (static B is zero here: charges only ever move transiently)
+        // dB_z/dt = dE_x/dy - dE_y/dx; in the layer B_z = B_zx + B_zy with dB_zx/dt = -dE_y/dx and
+        // dB_zy/dt = dE_x/dy, damped, and driven by the deviation of E from the static target
         for i in 0..nx {
             let ip = if i + 1 < nx { i + 1 } else { 0 };
             for j in 0..ny {
                 let jp = if j + 1 < ny { j + 1 } else { 0 };
                 let k = i * ny + j;
-                bz[k] += ((ex[i * ny + jp] - ex[k]) * dy_inv - (ey[ip * ny + j] - ey[k]) * dx_inv) * delta_t;
-                let sigma = sig_x[i] + sig_y[j];
-                if sigma > 0.0 { bz[k] *= 1.0 - sigma * delta_t; }
+                let (kx, ky) = (ip * ny + j, i * ny + jp);
+                if in_x[i] || in_y[j] {
+                    let d_ey = (ey[kx] - ty[kx]) - (ey[k] - ty[k]);
+                    let d_ex = (ex[ky] - tx[ky]) - (ex[k] - tx[k]);
+                    bzx[k] = fx[i] * bzx[k] - gx[i] * d_ey * dx_inv * delta_t;
+                    bzy[k] = fy[j] * bzy[k] + gy[j] * d_ex * dy_inv * delta_t;
+                    bz[k] = bzx[k] + bzy[k];
+                } else {
+                    // outside the layer B_z isn't split (its halves would grow without bound in a static field)
+                    bz[k] += ((ex[ky] - ex[k]) * dy_inv - (ey[kx] - ey[k]) * dx_inv) * delta_t;
+                }
                 ib[k] += bz[k] * delta_t;   // this B advances E below
             }
         }
 
-        // Then E a whole tick (backward differences of B), and in the absorbing layer damp the
-        // deviation of E from its running time-average, so that waves are absorbed but static fields
-        // are untouched (damping E itself drains the Coulomb field of the charges through the boundary)
-        let w_avg = delta_t / PML_AVERAGE_TIME;
-        let mut damped: f64 = 0.0;
+        // E: dE_x/dt = dB_z/dy - j_x, dE_y/dt = -dB_z/dx - j_y; in the layer the deviation from the
+        // static target is damped (which violates Gauss's law there while it happens, but the layer
+        // relaxes to the target, which obeys it; a global correction of div E would be acausal and
+        // radiates noise)
         for i in 0..nx {
             let im = if i > 0 { i - 1 } else { nx - 1 };
             for j in 0..ny {
                 let jm = if j > 0 { j - 1 } else { ny - 1 };
                 let k = i * ny + j;
-                ex[k] += ((bz[k] - bz[i * ny + jm]) * dy_inv - jx[k]) * delta_t;
-                ey[k] += (-(bz[k] - bz[im * ny + j]) * dx_inv - jy[k]) * delta_t;
-                let (sx, sy) = (sig_x[i], sig_y[j]);
-                if sx > 0.0 || sy > 0.0 {
-                    ax[k] += (ex[k] - ax[k]) * w_avg;
-                    ay[k] += (ey[k] - ay[k]) * w_avg;
-                    let (ddx, ddy) = ((ex[k] - ax[k]) * sy * delta_t, (ey[k] - ay[k]) * sx * delta_t);
-                    ex[k] -= ddx;
-                    ey[k] -= ddy;
-                    damped = damped.max(ddx.abs()).max(ddy.abs());
+                let cx = ((bz[k] - bz[i * ny + jm]) * dy_inv - jx[k]) * delta_t;
+                let cy = (-(bz[k] - bz[im * ny + j]) * dx_inv - jy[k]) * delta_t;
+                if in_x[i] || in_y[j] {
+                    let new_x = tx[k] + fyh[j] * (ex[k] - tx[k]) + gyh[j] * cx;
+                    let new_y = ty[k] + fxh[i] * (ey[k] - ty[k]) + gxh[i] * cy;
+                    ex[k] = new_x;
+                    ey[k] = new_y;
+                } else {
+                    ex[k] += cx;
+                    ey[k] += cy;
                 }
             }
         }
 
-        // Only damping that changed E can have violated Gauss's law. (Damping rates are at most
-        // PML_MAX_SIGMA * delta_t ~ 0.2 per tick, so the explicit update above is stable.)
-        if damped > 0.0 { self.divergence_dirty = true; }
-        // On the periodic grid the mean of E is a global mode: moving a charge changes it (d<E>/dt =
-        // -<j>; the absorbing layer changes it too), which in free space would not happen and would
-        // leave a uniform field behind. Each change of <E> is undone by a uniform change of E, but only
-        // after light has had time to cross the canvas: by then the wave that caused it has reached
-        // everywhere, so nothing changes ahead of a wavefront and the settled field is the static one.
-        self.simulation_time += delta_t;
-        let n = (nx * ny) as f64;
-        let mean_now = (self.elec_x.as_ref().unwrap().sum() / n, self.elec_y.as_ref().unwrap().sum() / n);
-        let change = (mean_now.0 - self.mean_field.0, mean_now.1 - self.mean_field.1);
-        if change != (0.0, 0.0) {
-            self.pending_mean_corrections.push_back((self.simulation_time, -change.0, -change.1));
-        }
-        let delay = self.geometry.x_max.hypot(self.geometry.y_max);
-        let (mut kick_x, mut kick_y) = (0.0, 0.0);
-        while let Some(&(t, kx, ky)) = self.pending_mean_corrections.front() {
-            if self.simulation_time - t < delay { break; }
-            kick_x += kx; kick_y += ky;
-            self.pending_mean_corrections.pop_front();
-        }
-        if kick_x != 0.0 || kick_y != 0.0 {
-            // uniform: no curl, so no B; added to the layer's running average too, so not damped
-            self.elec_x.as_mut().unwrap().mapv_inplace(|v| v + kick_x);
-            self.elec_y.as_mut().unwrap().mapv_inplace(|v| v + kick_y);
-            self.elec_avg_x.as_mut().unwrap().mapv_inplace(|v| v + kick_x);
-            self.elec_avg_y.as_mut().unwrap().mapv_inplace(|v| v + kick_y);
-            self.mean_current_integral.0 += kick_x;
-            self.mean_current_integral.1 += kick_y;
-        }
-        self.mean_field = (mean_now.0 + kick_x, mean_now.1 + kick_y);
         self.time_since_stream_function += delta_t;
         self.time_since_motion = if self.currents_nonzero { 0.0 } else { self.time_since_motion + delta_t };
 
-        self.ticks_since_divergence_cleaning += 1;
-        if self.ticks_since_divergence_cleaning >= DIVERGENCE_CLEANING_TICKS {
-            if self.divergence_dirty { self.clean_divergence(); }
-            self.ticks_since_divergence_cleaning = 0;
-        }
     }
 
-    /// Restore Gauss's law, div E = rho (with backward differences, as the field update preserves it),
-    /// by subtracting the gradient of del^-2 (div E - rho). The update conserves div E - rho exactly;
-    /// only the damping in the absorbing layer violates it.
-    pub fn clean_divergence(&mut self) {
-        self.ticks_since_divergence_cleaning = 0;
-        self.divergence_dirty = false;
-        self.make_cic_grid();
-        let elec_x = self.elec_x.as_ref().unwrap();
-        let elec_y = self.elec_y.as_ref().unwrap();
-        let rho = self.cic_grid.as_ref().unwrap();
-        let mut error = Array2::<f64>::zeros(rho.dim());
-        for i in 0..self.geometry.nx {
-            for j in 0..self.geometry.ny {
-                error[[i, j]] = self.stencils.evaluate(elec_x, i, j, &stencil::StencilType::GradX, &stencil::DifferenceType::Backward)
-                    + self.stencils.evaluate(elec_y, i, j, &stencil::StencilType::GradY, &stencil::DifferenceType::Backward)
-                    - rho[[i, j]];
-            }
-        }
-        let (cx, cy) = self.stencils.grad_del_squared_inv(&error);
-        *self.elec_x.as_mut().unwrap() -= &cx;
-        *self.elec_y.as_mut().unwrap() -= &cy;
-    }
 }
 
 impl FieldConfiguration {
@@ -712,7 +662,7 @@ pub fn compute_grid_stream_function_rest(field_configuration: &mut FieldConfigur
         // only if psi was computed recently (every frame while field lines are shown)
         Some(history) if fc.time_since_stream_function <= GAUGE_MAX_GAP => {
             let deposits: Vec<(f64, f64)> = fc.charges_at_last_tick.iter().map(|c| (c.x, c.y)).collect();
-            streamfn::causal_offset(&fc.geometry, &raw, history, fc.b_integral.as_ref().unwrap(), fc.mean_current_integral,
+            streamfn::causal_offset(&fc.geometry, &raw, history, fc.b_integral.as_ref().unwrap(),
                                     flux_per_unit_charge, &positions, &deposits)
         }
         _ => None,
@@ -736,7 +686,6 @@ pub fn compute_grid_stream_function_rest(field_configuration: &mut FieldConfigur
     for v in raw.iter_mut() { *v += offset; }
     fc.gauge_history = Some(streamfn::GaugeHistory { psi: raw, positions });
     fc.b_integral.as_mut().unwrap().fill(0.0);
-    fc.mean_current_integral = (0.0, 0.0);
     fc.time_since_stream_function = 0.0;
     rest
 }
@@ -794,7 +743,7 @@ mod stream_function_tests {
         let mut fc = FieldConfiguration::new(668.0, 335.0, 111, 111);
         let (x0, y0) = (334.0, 167.5);
         fc.charges = vec![Charge::new(x0, y0, 2.0), Charge::new(x0, y0, -2.0)];
-        let step: f64 = 0.1 * 668.0 / 111.0;
+        let step: f64 = fc.stable_timestep();
         for frame in 1..=60 {
             let t = frame as f64 / 60.0;
             let y = if frame == 60 { y0 } else { y0 + 25.0 * (2.0 * std::f64::consts::PI * t / 0.5).sin() };
@@ -856,7 +805,7 @@ mod dynamic_solver_tests {
     /// Advance as ui.js does at 60 frames per second (ticks of 0.1 cell, internal time = ms / 5),
     /// calling `each_frame(fc, t_ms)` before each frame.
     fn run(fc: &mut FieldConfiguration, ms: f64, mut each_frame: impl FnMut(&mut FieldConfiguration, f64)) {
-        let step: f64 = 0.1 * fc.geometry.x_max / fc.geometry.nx as f64;
+        let step: f64 = fc.stable_timestep();
         let frames = (ms / (1000.0 / 60.0)).round() as usize;
         for f in 1..=frames {
             each_frame(fc, f as f64 * 1000.0 / 60.0);
@@ -873,7 +822,7 @@ mod dynamic_solver_tests {
 
     /// max |E - E_poisson| over the physical region, relative to max |E_poisson|
     fn deviation_from_poisson(fc: &FieldConfiguration) -> f64 {
-        let mut p = FieldConfiguration::new(fc.geometry.x_max, fc.geometry.y_max, fc.geometry.nx, fc.geometry.ny);
+        let mut p = FieldConfiguration::with_geometry(fc.geometry.clone());
         p.charges = fc.charges.clone();
         p.initialize_on_constraints();
         let (ax, ay) = (fc.elec_x.as_ref().unwrap(), fc.elec_y.as_ref().unwrap());
@@ -957,7 +906,7 @@ mod dynamic_solver_tests {
             at8 = e;
         });
         println!("radiation energy / peak: {:.1e} at 4 s, {:.1e} at 8 s", at4 / peak, at8 / peak);
-        assert!(at4 / peak < 5e-3 && at8 / peak < 1e-4, "{} {}", at4 / peak, at8 / peak);
+        assert!(at4 / peak < 2e-6 && at8 / peak < 1e-8, "{} {}", at4 / peak, at8 / peak);
     }
 }
 
@@ -984,7 +933,7 @@ mod causal_field_line_tests {
     }
 
     fn frame(fc: &mut FieldConfiguration) {
-        let step: f64 = 0.1 * fc.geometry.x_max / fc.geometry.nx as f64;
+        let step: f64 = fc.stable_timestep();
         let mut dt: f64 = 1000.0 / 60.0 / 5.0;
         while dt > 0.0 { let s = step.min(dt); fc.tick(s); dt -= s; }
     }
@@ -1061,5 +1010,59 @@ mod causal_field_line_tests {
         let b = drawn_psi(&mut fc);
         let (worst, _) = far_change(&fc, &a, &b, 0.0);
         assert!(worst < 1e-9, "{}", worst);
+    }
+}
+/// The absorbing layer against vacuum: the same simulation on a grid 5x larger (whose walls are too
+/// far away for reflections to come back in time), compared over the canvas.
+#[cfg(test)]
+mod vacuum_comparison {
+    use super::*;
+    fn run_case(fc: &mut FieldConfiguration, off: (f64, f64), co: usize, pos: &dyn Fn(f64) -> Vec<(f64, f64, f64)>, np: usize) -> Vec<Vec<f64>> {
+        fc.charges = pos(0.0).iter().map(|&(x, y, q)| Charge::new(x + off.0, y + off.1, q)).collect();
+        fc.ensure_initialized();
+        let nb = fc.geometry.nboundary;
+        let mut snaps = vec![];
+        for f in 1..=360 {
+            let t = f as f64 * 1000.0 / 60.0;
+            fc.charges = pos(t).iter().map(|&(x, y, q)| Charge::new(x + off.0, y + off.1, q)).collect();
+            let mut dt: f64 = 1000.0 / 60.0 / 5.0;
+            while dt > 0.0 { let s = fc.stable_timestep().min(dt); fc.tick(s); dt -= s; }
+            if f % 60 == 0 {
+                let (ex, ey, bz) = (fc.elec_x.as_ref().unwrap(), fc.elec_y.as_ref().unwrap(), fc.mag_z.as_ref().unwrap());
+                let mut v = vec![];
+                for i in 0..np { for j in 0..np { let (a, b) = (i + nb + co, j + nb + co); v.push(ex[[a, b]]); v.push(ey[[a, b]]); v.push(bz[[a, b]]); } }
+                snaps.push(v);
+            }
+        }
+        // minus the static field of the final configuration
+        let mut p = FieldConfiguration::with_geometry(fc.geometry.clone());
+        p.charges = fc.charges.clone(); p.initialize_on_constraints();
+        let (ex, ey) = (p.elec_x.as_ref().unwrap(), p.elec_y.as_ref().unwrap());
+        let mut st = vec![];
+        for i in 0..np { for j in 0..np { let (a, b) = (i + nb + co, j + nb + co); st.push(ex[[a, b]]); st.push(ey[[a, b]]); st.push(0.0); } }
+        snaps.iter().map(|v| v.iter().zip(st.iter()).map(|(a, b)| a - b).collect()).collect()
+    }
+    #[test]
+    fn the_canvas_behaves_like_vacuum() {
+        let np = 85usize; let (dx, dy) = (668.0 / np as f64, 335.0 / np as f64);
+        let rms = |v: &[f64]| (v.iter().map(|x| x * x).sum::<f64>() / v.len() as f64).sqrt();
+        let shake = |t: f64| -> Vec<(f64, f64, f64)> { let y = if t < 300.0 { 167.5 + 25.0 * (2.0 * std::f64::consts::PI * t / 300.0).sin() } else { 167.5 }; vec![(334.0, y, 2.0), (334.0, 167.5, -2.0)] };
+        let drag = |t: f64| -> Vec<(f64, f64, f64)> { let u = (t / 300.0).min(1.0); vec![(467.6 + 60.0 * u, 167.5 + 20.0 * u, 3.0), (200.4, 167.5, -3.0)] };
+        // largest allowed difference from vacuum (relative to the peak of the transient) at 1..6 s:
+        // radiation is absorbed almost perfectly; after a drag the periodic images of the grid's
+        // static field (absent in vacuum) dominate the difference until the field has settled
+        let limits = [("shake", [1e-4, 2e-3, 2e-3, 1e-3, 5e-4, 2e-4]), ("drag", [0.06, 0.06, 0.06, 0.05, 0.04, 0.03])];
+        for ((name, limit), pos) in limits.iter().zip([&shake as &dyn Fn(f64) -> Vec<(f64, f64, f64)>, &drag]) {
+            let mut big = { let n = 5 * np; FieldConfiguration::with_geometry(Geometry { x_max: n as f64 * dx, y_max: n as f64 * dy, nx: n + 40, ny: n + 40, nboundary: 20 }) };
+            let r = run_case(&mut big, (2.0 * np as f64 * dx, 2.0 * np as f64 * dy), 2 * np, pos, np);
+            let peak = r.iter().map(|v| rms(v)).fold(0.0f64, f64::max);
+            let mut fc = FieldConfiguration::new(668.0, 335.0, 111, 111);
+            let s = run_case(&mut fc, (0.0, 0.0), 0, pos, np);
+            for (k, (a, b)) in s.iter().zip(r.iter()).enumerate() {
+                let e = rms(&a.iter().zip(b.iter()).map(|(x, y)| x - y).collect::<Vec<_>>()) / peak;
+                println!("{} at {} s: difference from vacuum / peak {:.1e}", name, k + 1, e);
+                assert!(e < limit[k], "{} at {} s: difference from vacuum {:.2e} (limit {:.0e})", name, k + 1, e, limit[k]);
+            }
+        }
     }
 }

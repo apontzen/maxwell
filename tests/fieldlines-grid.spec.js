@@ -47,7 +47,7 @@ async function gridLines(page, configs) {
             field.set_uniform_field(cfg.uniformX, cfg.uniformY);
             if (cfg.solver === 'dynamic') {
                 // as ui.js: ticks of 0.1 cell, internal time = ms / 5, 60 frames per second
-                const step = 0.1 * W / 111, frameMs = 1000 / 60;
+                const step = field.stable_timestep(), frameMs = 1000 / 60;
                 const m = cfg.motion;
                 const start = { ...charges[m?.index ?? 0] };
                 const frames = m ? Math.round((m.ms + m.waitMs) / frameMs) : 0;
@@ -229,8 +229,31 @@ for (const [group, configs] of [['Fourier solver', fourier], ['dynamic solver', 
 }
 
 test('the shaken dipole radiates closed field lines', async ({ page }) => {
-    const [r] = await gridLines(page, [dynamic[2]]);
-    expect(r.lines.filter(l => l.closed).length).toBeGreaterThan(0);
+    // while a charge of a coincident +-2 pair is shaken (period 0.5 s), closed field lines form and
+    // detach (they come and go, so look over the last half second of the shake)
+    await page.goto('/tests/blank.html');
+    const closed = await page.evaluate(async () => {
+        const wasm = await import('/maxwell/out/maxwell.js');
+        await wasm.default();
+        const { makeGridFieldModel } = await import('/gridfield.js');
+        const { electricFieldLines } = await import('/fieldlines2d.js');
+        const W = 668, H = 335, frameMs = 1000 / 60;
+        const field = new wasm.FieldConfiguration(W, H, 111, 111);
+        const charges = [{ x: 334, y: 167.5, charge: 2 }, { x: 334, y: 167.5, charge: -2 }];
+        field.set_charges(charges);
+        const counts = [];
+        for (let f = 1; f <= 60; f++) {
+            const t = f * frameMs;
+            charges[0].y = 167.5 + 25 * Math.sin(2 * Math.PI * t / 500);
+            field.set_charges(charges);
+            let dt = frameMs / 5;
+            while (dt > 0) { const s = Math.min(field.stable_timestep(), dt); field.tick(s); dt -= s; }
+            if (t > 500 && f % 3 === 0)
+                counts.push(electricFieldLines(makeGridFieldModel({ field, charges, width: W, height: H }), { width: W, height: H }).filter(l => l.closed).length);
+        }
+        return counts;
+    });
+    expect(Math.max(...closed)).toBeGreaterThan(0);
 });
 
 // Causality (dynamic solver): while a charge is dragged, the field lines ahead of the wavefront must
@@ -243,7 +266,7 @@ test('dynamic solver: field lines outside the light cone do not move during a dr
         await wasm.default();
         const { makeGridFieldModel } = await import('/gridfield.js');
         const { electricFieldLines } = await import('/fieldlines2d.js');
-        const W = 668, H = 335, frameMs = 1000 / 60, step = 0.1 * W / 111;
+        const W = 668, H = 335, frameMs = 1000 / 60;
         const out = [];
         for (const scenario of [
             { name: '+-3 pair, +3 dragged', charges: [{ x: 467.6, y: 167.5, charge: 3 }, { x: 200.4, y: 167.5, charge: -3 }], move: [60, 20] },
@@ -291,7 +314,7 @@ test('dynamic solver: field lines outside the light cone do not move during a dr
                 charges[0].y = start.y + scenario.move[1] * u;
                 field.set_charges(charges);
                 let dt = frameMs / 5;
-                while (dt > 0) { const s = Math.min(step, dt); field.tick(s); dt -= s; }
+                while (dt > 0) { const s = Math.min(field.stable_timestep(), dt); field.tick(s); dt -= s; }
                 const now = lines();
                 if (f % 5) continue;
                 const r = t / 5 + 80;

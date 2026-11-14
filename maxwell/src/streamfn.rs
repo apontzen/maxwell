@@ -270,9 +270,8 @@ pub fn stream_function_rest(solver: &mut StreamFunctionSolver, geometry: &Geomet
 //   its axis. (Matching psi to the free-space value around the edge instead does not work: the
 //   periodic images make psi_rest vary there by most of a line spacing.)
 // - causal (dynamic solver): away from currents, Maxwell's equations give
-//       flux_per_unit_charge * d psi / dt = B_z + mean_jx * y - mean_jy * x
-//   (the last terms from the uniform background current, see make_currents), exactly on the
-//   staggered grid. So the offset is chosen each frame so that psi has changed by the time integral
+//       flux_per_unit_charge * d psi / dt = B_z
+//   exactly on the staggered grid. So the offset is chosen each frame so that psi has changed by the time integral
 //   of the right-hand side since the previous frame, at every corner away from the charges. Then psi
 //   changes only where B does, and lines ahead of the wavefront do not move at all.
 // ---------------------------------------------------------------------------------------------
@@ -339,10 +338,10 @@ fn clear_of_charges(x: f64, y: f64, rx: f64, ry: f64, paths: &[((f64, f64), (f64
 }
 
 /// The causal offset (in units of charge) to add to psi_rest, given psi_raw = psi_rest + free psi
-/// now, the history, the time integral of B_z (padded grid) and of the mean current since then, and
-/// the charges' current positions. None if it can't be determined.
+/// now, the history, the time integral of B_z (padded grid) since then, and the charges' current
+/// positions. None if it can't be determined.
 pub fn causal_offset(geometry: &Geometry, raw: &[f64], history: &GaugeHistory, b_integral: &Array2<f64>,
-                     mean_current_integral: (f64, f64), flux_per_unit_charge: f64,
+                     flux_per_unit_charge: f64,
                      positions: &[(f64, f64)], deposit_positions: &[(f64, f64)]) -> Option<f64> {
     if history.positions.len() != positions.len() { return None; }
     let nb = geometry.nboundary;
@@ -350,7 +349,6 @@ pub fn causal_offset(geometry: &Geometry, raw: &[f64], history: &GaugeHistory, b
     let (dx, dy) = (geometry.delta_x(), geometry.delta_y());
     let mut paths: Vec<_> = history.positions.iter().zip(positions.iter()).map(|(&p, &q)| (p, q)).collect();
     paths.extend(deposit_positions.iter().map(|&p| (p, p)));
-    let (mx, my) = mean_current_integral;
     let mut vals = Vec::with_capacity(m * m);
     // the corners next to the edge are skipped: their faces border the absorbing layer
     for a in 2..m - 2 {
@@ -358,7 +356,7 @@ pub fn causal_offset(geometry: &Geometry, raw: &[f64], history: &GaugeHistory, b
             let (x, y) = (a as f64 * dx, b as f64 * dy);
             if !clear_of_charges(x, y, EXCLUSION_CELLS * dx, EXCLUSION_CELLS * dy, &paths) { continue; }
             // psi at corner (a, b) changes with B_z at the Yee node of padded cell (a + nb - 1, b + nb - 1)
-            let predicted = (b_integral[[a + nb - 1, b + nb - 1]] + mx * y - my * x) / flux_per_unit_charge;
+            let predicted = b_integral[[a + nb - 1, b + nb - 1]] / flux_per_unit_charge;
             let p = a * m + b;
             vals.push(LINES_PER_UNIT_CHARGE * (history.psi[p] + predicted - raw[p]));
         }
