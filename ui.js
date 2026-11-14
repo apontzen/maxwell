@@ -2,6 +2,7 @@ import init, { init_panic_hook, FieldConfiguration } from './maxwell/out/maxwell
 
 import { draw, getChargeFromPoint } from './draw.js';
 import { SOLVERS, canonicalSolver, effectiveSolver, isMagnetic, makeRenderModel } from './solvers.js';
+import { pairDipoles, dropDanglingPartners, nextChargeId } from './dipoles.js';
 
 const DYNAMIC_RUNTIME_SECONDS = 10;
 const DYNAMIC_RUNTIME_MS = DYNAMIC_RUNTIME_SECONDS * 1000;
@@ -228,6 +229,9 @@ export async function main(params) {
 
         if(dipoleCheckbox !== null) {
             dipoleMode = dipoleCheckbox.checked;
+            // ticking it pairs up the charges not yet in dipoles (dipoles.js)
+            if(dipoleMode && event !== undefined && event.target === dipoleCheckbox)
+                pairDipoles(charges);
         }
     
         updateSolverType(true);
@@ -496,6 +500,7 @@ export async function main(params) {
     function deleteCharge(charge) {
         if(!allowAddDeleteCharge) return;
         charges = charges.filter(c => c !== charge);
+        dropDanglingPartners(charges);   // its dipole partner, if any, is now free
         field.set_charges(charges);
     }
 
@@ -560,12 +565,10 @@ export async function main(params) {
     }
 
 
-    let charge_id = 0;
-
     function addCharge(x, y, charge) {
         if(!allowAddDeleteCharge) return;
-        charges.push({x, y, charge, id: charge_id});
-        charge_id++;
+        // (a fresh id: dipoles refer to their charges by id)
+        charges.push({x, y, charge, id: nextChargeId(charges)});
         deselectCharge();
         field.set_charges(charges);
         drawVectorField();

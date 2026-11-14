@@ -98,7 +98,8 @@ interacting with one leaves the others untouched.
 `explorer.spec.js` covers `index.html`: adding charges (button and double-click),
 the properties panel (strength slider, test-charge tickbox, delete), dragging,
 clear, every solver with its control visibility, the potential, field-line,
-force and per-charge tickboxes, the dipole tickbox, rigid dipoles, persistence in
+force and per-charge tickboxes, the dipole tickbox (ticking it pairs up the charges into
+rigid dipoles), rigid dipoles, persistence in
 localStorage across reloads, and copy/paste of the JSON state. It also checks
 that ticking field lines visibly switches a 3D solver to its 2D counterpart and
 back, and that the deprecated `magnetostatic_direct` name renders exactly as
@@ -152,6 +153,9 @@ solvers); see [issue #3](https://github.com/apontzen/maxwell/issues/3). Their ge
   a spinning dipole is unchanged, and settled lines match the static ones.
 - `solvers.spec.js` checks the solver registry (`solvers.js`): which model is used in
   each mode, the deprecated alias, and that forces and fields come from the same 2D model.
+- `dipoles.spec.js` unit-tests the pairing of charges into dipoles (`dipoles.js`): greedily, each
+  free charge with the nearest free charge of exactly the opposite charge (test charges with test
+  charges), keeping existing dipoles.
 
 `fixtures.spec.js` checks that `fixtures/examples.json` still matches the
 lecture notes. It runs whenever a `du_electromagnetism` checkout is found:

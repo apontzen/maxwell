@@ -332,6 +332,40 @@ test.describe('explorer (index.html)', () => {
         expect(await snapshot(page)).toMatchSnapshot(['dipole-translate.png']);
     });
 
+    test('ticking "Dipoles" pairs up the charges, which then move as rigid dipoles', async ({ page }) => {
+        // +1 and -1 near each other at the top, +2 and -2 at the bottom, and a lone +1
+        const state = {
+            charges: [
+                { x: 0.3, y: 0.3, charge: 1, id: 0 }, { x: 0.45, y: 0.3, charge: -1, id: 1 },
+                { x: 0.3, y: 0.7, charge: 2, id: 2 }, { x: 0.5, y: 0.7, charge: -2, id: 3 },
+                { x: 0.8, y: 0.5, charge: 1, id: 4 },
+            ],
+            solver: 'electrostatic_direct', showPotential: false, plotType: 'quiver', perCharge: false, dipoleMode: false,
+        };
+        await openExplorer(page, state);
+        const saved = () => page.evaluate(() => JSON.parse(localStorage.getItem('maxwell_state')));
+        await page.locator('#dipole').check();
+        await advance(page);
+        const s = await saved();
+        expect(s.dipoleMode).toBe(true);
+        expect(s.charges.map(c => c.dipoleWith)).toEqual([1, 0, 3, 2, undefined]);
+        // dragging the -2 charge rotates the bottom dipole about its centre; the others stay put
+        await drag(page, state.charges[3], { x: 0.4, y: 0.85 });
+        const after = (await saved()).charges;
+        const [p, m] = [after[2], after[3]];
+        const { width: W, height: H } = await page.locator(CANVAS).boundingBox();
+        expect(Math.abs(p.y - m.y)).toBeGreaterThan(0.05);   // it has rotated
+        expect(Math.hypot((p.x - m.x) * W, (p.y - m.y) * H)).toBeCloseTo(0.2 * W, 0);
+        expect((p.x + m.x) / 2).toBeCloseTo(0.4, 3);
+        expect((p.y + m.y) / 2).toBeCloseTo(0.7, 3);
+        expect(after[4]).toMatchObject({ x: 0.8, y: 0.5 });
+        // unticking and ticking again keeps the dipoles
+        await page.locator('#dipole').uncheck();
+        await page.locator('#dipole').check();
+        await advance(page);
+        expect((await saved()).charges.map(c => c.dipoleWith)).toEqual([1, 0, 3, 2, undefined]);
+    });
+
     test('"Copy" puts the state on the clipboard and "Paste" restores it', async ({ page, context }) => {
         await context.grantPermissions(['clipboard-read', 'clipboard-write']);
         await openExplorer(page, TWO_CHARGES);
