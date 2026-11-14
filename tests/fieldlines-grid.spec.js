@@ -256,6 +256,71 @@ test('the shaken dipole radiates closed field lines', async ({ page }) => {
     expect(Math.max(...closed)).toBeGreaterThan(0);
 });
 
+test('radiated closed field lines do not flicker', async ({ page }) => {
+    // Shake one charge of a coincident +-q pair (as a user dragging it would), then let go, computing
+    // the lines every frame. A closed line present at frames k-1 and k+1 must be there at frame k as
+    // well: every point of it (at k-1) must be near a line of its level at frame k. Missing loops
+    // used to come from saddles lying (almost) exactly on a level, from seeds claimed by traces that
+    // were not drawn, from levels compared without regard to psi being multivalued, and from
+    // extrema on long flat ridges (long thin loops) that Newton's method could not pin down.
+    await page.goto('/tests/blank.html');
+    const problems = [];
+    // [amplitude x, amplitude y (px), period (ms), seed, q]
+    for (const shake of [[30, 30, 350, 11, 2], [40, 20, 300, 13, 3]]) problems.push(...await page.evaluate(async ([AX, AY, PER, SEED, Q]) => {
+        const wasm = await import('/maxwell/out/maxwell.js');
+        await wasm.default();
+        const { makeGridFieldModel } = await import('/gridfield.js');
+        const { electricFieldLines } = await import('/fieldlines2d.js');
+        const W = 668, H = 335, frameMs = 1000 / 60;
+        const field = new wasm.FieldConfiguration(W, H, 111, 111);
+        const charges = [{ x: 334, y: 167.5, charge: Q }, { x: 334, y: 167.5, charge: -Q }];
+        field.set_charges(charges);
+        // levels are equivalent modulo the charges' gcd (q here)
+        const same = (a, b) => Math.abs((a - b) / Q - Math.round((a - b) / Q)) < 1e-6;
+        const frames = [];
+        let seed = SEED;
+        const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+        for (let f = 1; f <= 120; f++) {
+            if (f <= 60) {
+                const ph = 2 * Math.PI * f * frameMs / PER;
+                charges[0].x = 334 + AX * Math.sin(ph) + 3 * (rnd() - 0.5);
+                charges[0].y = 167.5 + AY * Math.sin(ph) + 2 * (rnd() - 0.5);
+            }
+            field.set_charges(charges);
+            let dt = frameMs / 5;   // as ui.js
+            while (dt > 0) { const s = Math.min(field.stable_timestep(), dt); field.tick(s); dt -= s; }
+            if (f > 20) frames.push(electricFieldLines(makeGridFieldModel({ field, charges, width: W, height: H }), { width: W, height: H }));
+        }
+        const dist = (p, lines) => {
+            let best = Infinity;
+            for (const l of lines) {
+                const P = l.closed ? [...l.points, l.points[0]] : l.points;
+                for (let i = 0; i + 1 < P.length; i++) {
+                    const [a, b] = [P[i], P[i + 1]], dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy;
+                    const u = l2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2)) : 0;
+                    best = Math.min(best, Math.hypot(p[0] - a[0] - u * dx, p[1] - a[1] - u * dy));
+                }
+            }
+            return best;
+        };
+        const centre = l => l.points.reduce((c, p) => [c[0] + p[0] / l.points.length, c[1] + p[1] / l.points.length], [0, 0]);
+        const out = [];
+        for (let k = 1; k + 1 < frames.length; k++) {
+            for (const loop of frames[k - 1].filter(l => l.closed)) {
+                const c = centre(loop);
+                const later = frames[k + 1].filter(l => l.closed && same(l.level, loop.level));
+                if (!later.some(l => { const d = centre(l); return Math.hypot(d[0] - c[0], d[1] - c[1]) < 12; })) continue;
+                const now = frames[k].filter(l => same(l.level, loop.level));
+                const far = loop.points.filter(p => dist(p, now) > 8).length;
+                if (far > loop.points.length / 2)
+                    out.push(`shake ${AX},${AY},${PER},${SEED}, q = ${Q}, frame ${k}: the loop of level ${loop.level} round (${c[0].toFixed(0)}, ${c[1].toFixed(0)}) is missing`);
+            }
+        }
+        return out;
+    }, shake));
+    report(problems, 'Flickering loops');
+});
+
 // Causality (dynamic solver): while a charge is dragged, the field lines ahead of the wavefront must
 // not move: by at most 0.5 px, or 2% of the local line spacing where the field is weak. Light travels
 // 1 px per 5 ms; the margin covers the smeared charge (8 cells, ~63 px in x).

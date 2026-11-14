@@ -34,6 +34,7 @@ const NEAR_FRACTION = 0.1;            // step <= this fraction of the distance t
 const MAX_TURN_COS = Math.cos(0.15);  // max turning angle of the tangent over a half step
 const INFINITY_FACTOR = 10;           // "infinity" is this many view diagonals from the view centre
 export const MAX_STEPS = 30000;
+const MAX_SNAP_RADIUS = 12;           // px
 const MAX_CORRECTION = 0.2;          // max Newton correction as a fraction of the step
 const DEAD_LEVELS_PER_DIAGONAL = 0.01; // grid models: weaker fields are noise (see gridStagnationPoints)
 const DEAD_WINDOW = 2;                // corners
@@ -385,32 +386,83 @@ export function gridStagnationPoints(T, ev) {
     T.dead = anyDead ? dead : null;
     const cellR = 2 * Math.hypot(dx, dy);
     const out = [];
-    for (let a = 0; a + 1 < m; a++) for (let b = 0; b + 1 < m; b++) {
-        if (T.dead && (dead[a * m + b] || dead[(a + 1) * m + b] || dead[a * m + b + 1] || dead[(a + 1) * m + b + 1])) continue;
-        const k = [a * m + b, (a + 1) * m + b, a * m + b + 1, (a + 1) * m + b + 1];
-        let px = 0, nx = 0, py = 0, ny = 0;
-        for (const q of k) {
-            if (gx[q] > 0) px++; else nx++;
-            if (gy[q] > 0) py++; else ny++;
-        }
-        if (!px || !nx || !py || !ny) continue;
-        let x = (a + 0.5) * dx, y = (b + 0.5) * dy;
-        if (nearSource(x, y, cellR)) continue;
-        let ok = false, det = 0;
+    const isDead = (a, b) => T.dead && dead[a * m + b];
+    // Newton on grad psi = 0 from (x0, y0); null unless it converges within a cell of there.
+    // (Converged at a step of 1e-6 cells: near an elongated extremum, i.e. a thin loop, the Hessian
+    // is nearly singular and rounding errors in the gradient give steps far above machine precision.)
+    const refine = (x0, y0) => {
+        let x = x0, y = y0;
+        let det = 0;
         for (let it = 0; it < 20; it++) {
             const h = 1e-3 * dx;
             ev.grad(x, y); const fx = ev.gx, fy = ev.gy;
             ev.grad(x + h, y); const axx = (ev.gx - fx) / h, ayx = (ev.gy - fy) / h;
             ev.grad(x, y + h); const axy = (ev.gx - fx) / h, ayy = (ev.gy - fy) / h;
             det = axx * ayy - axy * ayx;
-            if (det === 0) break;
+            if (det === 0) return null;
             const sx = (ayy * fx - axy * fy) / det, sy = (axx * fy - ayx * fx) / det;
             x -= sx; y -= sy;
-            if (Math.hypot(sx, sy) < 1e-9 * dx) { ok = true; break; }
+            if (Math.abs(x - x0) > dx || Math.abs(y - y0) > dy) return null;
+            if (Math.hypot(sx, sy) < 1e-6 * dx) return { x, y, det };
         }
-        if (!ok || x < (a - 0.5) * dx || x > (a + 1.5) * dx || y < (b - 0.5) * dy || y > (b + 1.5) * dy) continue;
-        if (out.some(p => Math.hypot(p.x - x, p.y - y) < 0.5)) continue;
-        out.push({ x, y, m: 1, extremum: det > 0 });
+        return null;
+    };
+    const add = (r) => {
+        if (!r || nearSource(r.x, r.y, cellR)) return;
+        if (out.some(p => Math.hypot(p.x - r.x, p.y - r.y) < 1)) return;
+        out.push({ x: r.x, y: r.y, m: 1, extremum: r.det > 0 });
+    };
+
+    // (1) cells over whose corners both components of grad psi change sign. mask: bits for the
+    // signs (+x, -x, +y, -y) of grad psi present at the cell's corners
+    const sign = q => (gx[q] > 0 ? 1 : 2) | (gy[q] > 0 ? 4 : 8);
+    const mask = new Uint8Array(m * m);
+    for (let a = 0; a + 1 < m; a++) for (let b = 0; b + 1 < m; b++) {
+        const p = a * m + b;
+        mask[p] = sign(p) | sign(p + m) | sign(p + 1) | sign(p + m + 1);
+        if (mask[p] !== 15) continue;
+        if (isDead(a, b) || isDead(a + 1, b) || isDead(a, b + 1) || isDead(a + 1, b + 1)) continue;
+        const x = (a + 0.5) * dx, y = (b + 0.5) * dy;
+        if (nearSource(x, y, cellR)) continue;
+        add(refine(x, y));
+    }
+
+    // (2) Extrema elongated along a ridge (long thin loops, along which psi is almost flat) can be
+    // too ill-conditioned for Newton's method. So also look for corners that are discrete extrema
+    // of psi among their 8 neighbours, among those round which grad psi has both signs of both
+    // components (as (1), over 3x3 corners) and (1) found nothing. Such a corner stands in for the
+    // extremum, in T.loopCentres: closedLoops only needs a point inside the innermost loop. (They
+    // are kept apart from the stagnation points, near which the tracer takes small steps.) psi
+    // differences between neighbouring corners are exact (psi_rest is interpolated through the
+    // corners) and unwrapped.
+    T.loopCentres = [];
+    const ring = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];
+    const angles = new Float64Array(T.n * m * m).fill(NaN);   // lazily: from each source to each corner
+    const anglesAt = (i, j) => {
+        const p = (i * m + j) * T.n;
+        if (T.n && Number.isNaN(angles[p]))
+            for (let k = 0; k < T.n; k++) angles[p + k] = Math.atan2(j * dy - T.ys[k], i * dx - T.xs[k]);
+        return p;
+    };
+    const discreteExtremum = (a, b) => {
+        const t0 = anglesAt(a, b), v0 = R.data[a * m + b];
+        let pos = false, neg = false;
+        for (const [u, v] of ring) {
+            const t1 = anglesAt(a + u, b + v);
+            let d = R.data[(a + u) * m + b + v] - v0 + (T.ux * v * dy - T.uy * u * dx) * ev.c;
+            for (let k = 0; k < T.n; k++) d += T.qs[k] * wrap(angles[t1 + k] - angles[t0 + k]) / TWO_PI;
+            if (d > 0) pos = true; else neg = true;
+            if (pos && neg) return false;
+        }
+        return true;
+    };
+    const near = 1.5 * Math.max(dx, dy);
+    for (let a = 1; a + 1 < m; a++) for (let b = 1; b + 1 < m; b++) {
+        const p = a * m + b;
+        if ((mask[p] | mask[p - 1] | mask[p - m] | mask[p - m - 1]) !== 15 || isDead(a, b)) continue;
+        const x = a * dx, y = b * dy;
+        if (out.some(p => Math.abs(p.x - x) < near && Math.abs(p.y - y) < near)) continue;
+        if (!nearSource(x, y, cellR) && discreteExtremum(a, b)) T.loopCentres.push({ x, y });
     }
     return out;
 }
@@ -452,11 +504,24 @@ export function softenStagnationPoints(T, pts) {
 }
 
 /**
+ * A stagnation point to snap onto (see prepareSnap), prepared only when a trace first comes within
+ * `rmax` of it, an upper bound on its snapping radius: most are never reached, and preparing one
+ * costs some hundreds of evaluations of psi.
+ */
+export function lazySnap(T, s, level, levelSpacing, levelOffset) {
+    let ds = Infinity;
+    for (let i = 0; i < T.n; i++) ds = Math.min(ds, Math.hypot(s.x - T.xs[i], s.y - T.ys[i]));
+    for (const o of T.crit) if (o !== s) ds = Math.min(ds, Math.hypot(s.x - o.x, s.y - o.y) || Infinity);
+    const rmax = Math.max(Math.min(1.0, 0.05 * ds), Math.min(0.3 * ds, MAX_SNAP_RADIUS));
+    return { x: s.x, y: s.y, level, rmax, lazy: { s, levelSpacing, levelOffset }, prep: undefined };
+}
+
+/**
  * Prepare a stagnation point that lies exactly on a traced level for snapping: its snapping
  * radius and the angles of its branches, sorted, each flagged incoming/outgoing for the forward
  * direction. Returns null if the branch structure can't be resolved (then it is not snapped).
  */
-export function prepareSnap(T, ev, s, levelSpacing) {
+export function prepareSnap(T, ev, s, levelSpacing, levelOffset = 0) {
     // distance to the nearest source or other stagnation point
     let ds = Infinity;
     for (let i = 0; i < T.n; i++) ds = Math.min(ds, Math.hypot(s.x - T.xs[i], s.y - T.ys[i]));
@@ -468,6 +533,9 @@ export function prepareSnap(T, ev, s, levelSpacing) {
     const hess = Math.hypot(ax - bx, ay - by) / (2 * h);
     let rs = Math.min(1.0, 0.05 * ds);
     if (hess > 0) rs = Math.min(rs, Math.sqrt(0.01 * levelSpacing / hess));
+    // a level `levelOffset` away from the saddle's value passes it at ~sqrt(2 offset / hess): the
+    // snap radius must reach that far (grid models, see fieldlines2d.js)
+    if (levelOffset > 0 && hess > 0) rs = Math.min(Math.max(rs, 2 * Math.sqrt(2 * levelOffset / hess)), 0.3 * ds, MAX_SNAP_RADIUS);
     const nb = 2 * (s.m + 1);
     const ns = 24 * nb;
     const vals = new Float64Array(ns + 1);
@@ -482,7 +550,7 @@ export function prepareSnap(T, ev, s, levelSpacing) {
         if ((a < 0) === (b < 0) && a !== 0) continue;
         if (b === 0) continue; // counted in the next interval
         let t0 = TWO_PI * k / ns - Math.PI, t1 = TWO_PI * (k + 1) / ns - Math.PI, f0 = a;
-        for (let it = 0; it < 50; it++) {
+        for (let it = 0; it < 50 && t1 - t0 > 1e-9; it++) {
             const tm = 0.5 * (t0 + t1);
             const [x, y] = pt(tm);
             const fm = ev.diff(x, y, s.x, s.y);
@@ -619,8 +687,22 @@ export function traceContour(T, ev, x, y, L, dir, opts) {
             if ((x - leaving.x) ** 2 + (y - leaving.y) ** 2 > 2.25 * leaving.rs * leaving.rs) leaving = null;
         }
         for (let k = 0; k < snaps.length; k++) {
-            const s = snaps[k];
+            let s = snaps[k];
+            if (s.lazy) {   // see lazySnap
+                if ((x - s.x) ** 2 + (y - s.y) ** 2 >= s.rmax * s.rmax) continue;
+                if (s.prep === undefined) {
+                    s.prep = prepareSnap(T, ev, s.lazy.s, s.lazy.levelSpacing, s.lazy.levelOffset);
+                    if (s.prep) s.prep.level = s.level;
+                }
+                if (!s.prep) continue;
+                s = s.prep;
+            }
             if (s === leaving) continue;
+            if (s.level !== undefined) {   // a snap for another level? (modulo T.levelPeriod: psi is multivalued)
+                let d = s.level - L;
+                if (T.levelPeriod) d -= T.levelPeriod * Math.round(d / T.levelPeriod);
+                if (Math.abs(d) > 1e-9) continue;
+            }
             const dx = x - s.x, dy = y - s.y;
             if (dx * dx + dy * dy >= s.rs * s.rs) continue;
             // arrived at a stagnation point on this contour: continue along the paired branch
@@ -729,9 +811,10 @@ function edgeCrossing(T, ev, L, px, py, x, y) {
 /**
  * Step for sampling a seed curve at (x, y), where the sampled function has gradient magnitude
  * `gradNorm` and its levels are `levelSpacing` apart: the function changes by at most a quarter
- * of a level per step, so level crossings are not missed.
+ * of a level per step, so level crossings are not missed. `exclude`: a stagnation point not to slow
+ * down for (on a path leaving it radially: the function is quadratic, so monotonic, along it there).
  */
-export function sampleStep(T, x, y, gradNorm, levelSpacing) {
+export function sampleStep(T, x, y, gradNorm, levelSpacing, exclude) {
     let h = VISIBLE_STEP;
     if (gradNorm > 0) h = Math.min(h, 0.25 * levelSpacing / gradNorm);
     let d2 = Infinity;
@@ -739,7 +822,7 @@ export function sampleStep(T, x, y, gradNorm, levelSpacing) {
         const dx = x - T.xs[i], dy = y - T.ys[i];
         d2 = Math.min(d2, dx * dx + dy * dy);
     }
-    for (const c of T.crit) d2 = Math.min(d2, (x - c.x) ** 2 + (y - c.y) ** 2);
+    for (const c of T.crit) if (c !== exclude) d2 = Math.min(d2, (x - c.x) ** 2 + (y - c.y) ** 2);
     h = Math.min(h, NEAR_FRACTION * Math.sqrt(d2));
     return Math.max(h, 1e-4);
 }

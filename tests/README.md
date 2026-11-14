@@ -129,7 +129,8 @@ solvers); see [issue #3](https://github.com/apontzen/maxwell/issues/3). Their ge
   `dynamic`; `gridfield.js` on top of the stream function computed in `maxwell/src/streamfn.rs`):
   4|q| line ends per charge, lines end on a charge, on the edge of the canvas (the grid world ends
   there) or fade out where there is no field, tangency, Gauss's law, a time budget, and closed
-  field lines radiated by a shaken dipole; a line along the axis of a +-3 pair (as decision D5);
+  field lines radiated by a shaken dipole, which must not flicker (a loop present in the frames
+  before and after one must be in that one too); a line along the axis of a +-3 pair (as decision D5);
   and, for the dynamic solver, that field lines outside the light cone do not move while a charge
   is dragged (the drawn levels are chosen causally, see `maxwell/src/streamfn.rs`). The lecture examples, random configurations and a net
   charge are used for the Fourier solver; for the dynamic solver, lecture 14 before and after a

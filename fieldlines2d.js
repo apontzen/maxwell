@@ -71,13 +71,15 @@
 //   between the members' remaining line ends).
 //   Grid models: psi has a single-valued part interpolated from the grid; stagnation points are
 //   found on the grid; lines are also seeded on the edge of the world (lines that touch no charge)
-//   and along a ray from each extremum of psi to the edge (closed lines: each encloses one).
+//   and along a ray from each extremum of psi to the edge (closed lines: each encloses one; see
+//   closedLoops for extrema too ill-conditioned to find). Saddles within GRID_SNAP_TOLERANCE of a
+//   level are snapped onto. Lines' levels are compared modulo the charges (psi is multivalued).
 
 
 import { LINES_PER_UNIT_CHARGE } from './fieldmodels.js';
 import {
     buildSystem, PsiEvaluator, PotentialEvaluator, stagnationPoints, softenStagnationPoints, gridStagnationPoints, inDeadZone,
-    prepareSnap, traceContour, sampleStep, bracketRoot, seedBox, boxPoint, SegmentHash,
+    prepareSnap, lazySnap, traceContour, sampleStep, bracketRoot, seedBox, boxPoint, SegmentHash,
 } from './levelsets2d.js';
 
 export { LINES_PER_UNIT_CHARGE };
@@ -221,6 +223,7 @@ export function electricFieldLines(model, view) {
 }
 
 const MIN_EDGE_LINE = 4; // px
+const GRID_SNAP_TOLERANCE = 0.03;   // in line spacings
 
 function pathLength(pts) {
     let s = 0;
@@ -239,12 +242,23 @@ function electricLines(model, view) {
     if (T.n === 0 && !T.hasUniform && !T.region) return [];
     const ev = new PsiEvaluator(T);
     T.crit = T.rest ? gridStagnationPoints(T, ev) : stagnationPoints(T);
+    const tag = levelTagger(T);
+    // Stagnation points lying on a traced level are snapped onto (see traceContour), so that which
+    // way a contour goes there doesn't depend on rounding. For grid models a saddle within
+    // GRID_SNAP_TOLERANCE of a level counts: otherwise, e.g. in a symmetric configuration where the
+    // saddles lie exactly on a level, noise decides frame by frame whether a radiation loop has
+    // detached, and loops flicker.
     const snaps = [];
+    const tolerance = T.region ? GRID_SNAP_TOLERANCE : 1e-8;
     for (const s of T.crit) {
+        if (s.extremum) continue;
         const v = LPU * ev.principal(s.x, s.y);
-        if (Math.abs(v - Math.round(v)) < 1e-8) {
+        const off = Math.abs(v - Math.round(v));
+        if (off < tolerance) {
+            const level = Math.round(v) / LPU;
+            if (T.region) { snaps.push(lazySnap(T, s, level, 1 / LPU, off / LPU)); continue; }
             const p = prepareSnap(T, ev, s, 1 / LPU);
-            if (p) snaps.push(p);
+            if (p) { p.level = level; snaps.push(p); }
         }
     }
     T.snaps = snaps;
@@ -320,7 +334,10 @@ function electricLines(model, view) {
     if (T.hasUniform || T.region) {
         const box = T.region ? regionSeedBox(T) : seedBox(T, SEED_MARGIN);
         const hash = new SegmentHash(box);
-        for (const l of lines) hash.insertPolyline(l.points, 0);
+        // Tagged with their level: a seed is only on a traced line of its own level (a line of another
+        // level can pass within the hash's tolerance, e.g. where lines are dense near the charges).
+        // psi is multivalued, so levels are compared modulo the charges.
+        for (const l of lines) hash.insertPolyline(l.points, tag(l.level));
         const seeds = psiBoxSeeds(T, ev, box);
         diag.seeds = seeds.length;
         // grid models: lines already traced end exactly where they cross the edge of the world
@@ -332,7 +349,7 @@ function electricLines(model, view) {
         for (const sd of seeds) {
             if (inDeadZone(T, sd.x, sd.y)) continue;
             if (ends.some(([ex, ey]) => Math.abs(ex - sd.x) + Math.abs(ey - sd.y) < 1e-4)) continue;
-            if (hash.contains(sd.x, sd.y)) continue;
+            if (hash.contains(sd.x, sd.y, tag(sd.level))) continue;
             ev.copyStateFrom(sd.th);
             const f = traceContour(T, ev, sd.x, sd.y, sd.level, 1, { capture: captureNeg, snaps });
             if (f.end === 'capture') { diag.freeHitCharge++; continue; }
@@ -341,15 +358,28 @@ function electricLines(model, view) {
             if (b.end === 'capture') { diag.freeHitCharge++; continue; }
             if (!openEnd(f.end) || !openEnd(b.end)) diag.maxsteps++;
             const pts = b.pts.reverse().concat(f.pts.slice(1));
-            hash.insertPolyline(pts, 0);
+            hash.insertPolyline(pts, tag(sd.level));
             // grid models: a stub where a contour of a (nearly) dead zone grazes the edge
             if (T.region && pathLength(pts) < MIN_EDGE_LINE) continue;
             lines.push({ points: pts, from: 'infinity', to: 'infinity', level: sd.level });
         }
-        if (T.region) closedLoops(T, ev, hash, captureNeg, snaps, lines);
+        if (T.region) closedLoops(T, ev, hash, tag, captureNeg, capturePos, snaps, lines);
     }
     Object.assign(diagnostics, diag, { stagnation: T.crit.length, snaps: snaps.length });
     return lines;
+}
+
+/**
+ * A label for the contour of psi at `level` (a multiple of 1/LPU): psi changes by q around a source
+ * of charge q, so levels differing by a combination of the charges label the same contours.
+ */
+function levelTagger(T) {
+    const gcd = (a, b) => b ? gcd(b, a % b) : a;
+    let G = 0;
+    for (let i = 0; i < T.n; i++) G = gcd(G, Math.round(LPU * Math.abs(T.qs[i])));
+    T.levelPeriod = G / LPU;   // for traceContour's snaps
+    return G ? (level => { const m = Math.round(LPU * level) % G; return m < 0 ? m + G : m; })
+             : (level => Math.round(LPU * level));
 }
 
 /** Grid models: the edge of the world, moved just inside it. */
@@ -364,8 +394,12 @@ function psiBoxSeeds(T, ev, box) {
     return psiPathSeeds(T, ev, s => boxPoint(box, s), P);
 }
 
-/** Points on the path pointAt(s), 0 <= s <= P, where psi (unwrapped along it) crosses a level k / LPU. */
-function psiPathSeeds(T, ev, pointAt, P) {
+/**
+ * Points on the path pointAt(s), 0 <= s <= P, where psi (unwrapped along it) crosses a level k / LPU,
+ * in order along the path. If `stop` is given, it is called with each, and a true result ends the
+ * search. `origin`: the stagnation point the path starts from, if any (see sampleStep).
+ */
+function psiPathSeeds(T, ev, pointAt, P, stop, origin) {
     let s = 0;
     let [x, y] = pointAt(0);
     ev.resetPrincipal(x, y);
@@ -375,7 +409,7 @@ function psiPathSeeds(T, ev, pointAt, P) {
         const thPrev = ev.saveState();
         const xp = x, yp = y, vp = v;
         const sp = s;
-        s = Math.min(P, s + sampleStep(T, x, y, Math.hypot(ev.gx, ev.gy), 1 / LPU));
+        s = Math.min(P, s + sampleStep(T, x, y, Math.hypot(ev.gx, ev.gy), 1 / LPU, origin));
         [x, y] = pointAt(s);
         v = ev.val(x, y);
         let ka = Math.floor(LPU * vp), kb = Math.floor(LPU * v);
@@ -388,34 +422,61 @@ function psiPathSeeds(T, ev, pointAt, P) {
             const th = new Float64Array(T.n);
             for (let j = 0; j < T.n; j++)
                 th[j] = thPrev[j] + wrap(Math.atan2(qy - T.ys[j], qx - T.xs[j]) - Math.atan2(yp - T.ys[j], xp - T.xs[j]));
-            seeds.push({ x: qx, y: qy, th, level });
+            const seed = { x: qx, y: qy, th, level };
+            seeds.push(seed);
+            if (stop && stop(seed)) return seeds;
         }
     }
     return seeds;
 }
 
+const INNERMOST_RAY_CELLS = 12;
+
 /**
  * Grid models: closed field lines (e.g. radiation). Each encloses an extremum of psi, so seed along
- * a ray from every extremum to the edge of the world.
+ * a ray from every extremum to the edge of the world. An extremum on a long flat ridge (a long thin
+ * loop) can be too ill-conditioned to pin down; then a saddle beside it on the ridge, or a corner
+ * of the grid that is a discrete extremum (T.loopCentres, see gridStagnationPoints), lies inside
+ * the same loops.
+ * Rays from those only look for loops round that point: they end at the first crossing that is not
+ * a new loop, or after INNERMOST_RAY_CELLS cells (they are many, mostly in weak noisy fields, and
+ * their full rays would cost as much as all the rest).
  */
-function closedLoops(T, ev, hash, capture, snaps, lines) {
+function closedLoops(T, ev, hash, tag, capture, captureBack, snaps, lines) {
     const reg = T.region;
-    for (const c of T.crit) {
-        if (!c.extremum || inDeadZone(T, c.x, c.y)) continue;
+    const tracer = new PsiEvaluator(T);
+    const origins = T.crit.filter(c => c.extremum).concat(T.crit.filter(c => !c.extremum), T.loopCentres);
+    for (const c of origins) {
+        if (inDeadZone(T, c.x, c.y)) continue;
+        const innermost = !c.extremum;
         // the ray towards the nearest edge
         const d = [[c.x - reg.x0, -1, 0], [reg.x1 - c.x, 1, 0], [c.y - reg.y0, 0, -1], [reg.y1 - c.y, 0, 1]]
             .sort((p, q) => p[0] - q[0])[0];
-        const L = d[0] * (1 - 1e-9);
+        let L = d[0] * (1 - 1e-9);
+        if (innermost) L = Math.min(L, INNERMOST_RAY_CELLS * Math.max(T.rest.dx, T.rest.dy));
         const r0 = 1e-3;
-        const seeds = psiPathSeeds(T, ev, s => [c.x + d[1] * (r0 + s), c.y + d[2] * (r0 + s)], L - r0);
-        for (const sd of seeds) {
-            if (inDeadZone(T, sd.x, sd.y) || hash.contains(sd.x, sd.y)) continue;
-            ev.copyStateFrom(sd.th);
-            const f = traceContour(T, ev, sd.x, sd.y, sd.level, 1, { capture, snaps, closeGate: true });
-            hash.insertPolyline(f.pts, 0);
-            if (f.end !== 'closed') continue;   // open lines are found from the charges and the edge
-            lines.push({ points: f.pts, from: 'loop', to: 'loop', level: sd.level, closed: true });
-        }
+        psiPathSeeds(T, ev, s => [c.x + d[1] * (r0 + s), c.y + d[2] * (r0 + s)], L - r0, sd => {
+            if (inDeadZone(T, sd.x, sd.y) || hash.contains(sd.x, sd.y, tag(sd.level))) return innermost;
+            tracer.copyStateFrom(sd.th);
+            const f = traceContour(T, tracer, sd.x, sd.y, sd.level, 1, { capture, snaps, closeGate: true });
+            if (f.end === 'closed') {
+                hash.insertPolyline(f.pts, tag(sd.level));
+                lines.push({ points: f.pts, from: 'loop', to: 'loop', level: sd.level, closed: true });
+                return false;
+            }
+            // Not closed: an open line. One reaching a charge has been traced from the charge, and
+            // one crossing the edge at both ends from the edge; one that fades out in a dead zone
+            // has not: draw it from here. Traces not drawn must not claim seeds (they can disagree
+            // with the drawn line where they pass a saddle, and a loop's seed would then be lost).
+            if (f.end !== 'faded' && f.end !== 'infinity') return innermost;
+            tracer.copyStateFrom(sd.th);
+            const b = traceContour(T, tracer, sd.x, sd.y, sd.level, -1, { capture: captureBack, snaps });
+            if (!openEnd(b.end)) return innermost;
+            const pts = b.pts.reverse().concat(f.pts.slice(1));
+            hash.insertPolyline(pts, tag(sd.level));
+            if (pathLength(pts) >= MIN_EDGE_LINE) lines.push({ points: pts, from: 'infinity', to: 'infinity', level: sd.level });
+            return innermost;
+        }, c);
     }
 }
 
