@@ -411,7 +411,10 @@ export function draw(ctx, rect, charges, renderModel, { plotType, showPotential,
     }
 
 
-    const model2D = renderModel.model2D;
+    // Only read model2D when it is needed: for the grid solvers it is built on demand (the stream
+    // function costs a few ms per frame), and quiver plots don't use it.
+    const needs2D = plotType === 'fieldline' || (showPotential && renderModel.info.type === '2d');
+    const model2D = needs2D ? renderModel.model2D : null;
 
     if (showPotential && !renderModel.isMagnetic && !renderModel.perCharge && renderModel.info.potential) {
         if (model2D) {

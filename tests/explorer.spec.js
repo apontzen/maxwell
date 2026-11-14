@@ -35,8 +35,8 @@ const SOLVERS = ['electrostatic_direct', 'electrostatic_line_charge', 'electrost
 const CONTROLS_FOR_SOLVER = {
     electrostatic_direct: { potential: true, fieldlines: true, forces: true, perCharge: true },
     electrostatic_line_charge: { potential: true, fieldlines: true, forces: true, perCharge: true },
-    electrostatic_fourier: { potential: false, fieldlines: false, forces: false, perCharge: false },
-    dynamic: { potential: false, fieldlines: false, forces: false, perCharge: false },
+    electrostatic_fourier: { potential: false, fieldlines: true, forces: false, perCharge: false },
+    dynamic: { potential: false, fieldlines: true, forces: false, perCharge: false },
     magnetostatic_moving_charge: { potential: false, fieldlines: true, forces: true, perCharge: true },
     magnetostatic_wire: { potential: false, fieldlines: true, forces: true, perCharge: true },
 };
@@ -200,6 +200,35 @@ test.describe('explorer (index.html)', () => {
         });
     }
 
+    for (const solver of ['dynamic', 'electrostatic_direct']) {
+        test(`each animation frame redraws once (${solver}), however many clicks and drags came before`, async ({ page }) => {
+            // Count the page's requestAnimationFrame callbacks per frame: all callbacks of one frame
+            // receive the same timestamp. (Earlier, every click on a charge or on empty canvas started
+            // another animation loop in dynamic mode, so N interactions meant N redraws per frame.)
+            await page.addInitScript(() => {
+                const raf = window.requestAnimationFrame.bind(window);
+                window.__rafTimes = [];
+                window.requestAnimationFrame = cb => raf(t => { window.__rafTimes.push(t); cb(t); });
+            });
+            await openExplorer(page, { ...TWO_CHARGES, solver });
+            let at = { x: 0.3, y: 0.5 };
+            for (let k = 0; k < 5; k++) {
+                const to = { x: 0.3 + 0.02 * ((k % 2) ? -1 : 1), y: 0.5 + 0.03 * k };
+                await drag(page, at, to, 4);
+                at = to;
+                const empty = await canvasPoint(page, { x: 0.9, y: 0.1 });
+                await page.mouse.click(empty.x, empty.y);   // deselects (redraws)
+            }
+            await page.evaluate(() => { window.__rafTimes.length = 0; });
+            await advance(page, 500);
+            const perFrame = {};
+            for (const t of await page.evaluate(() => window.__rafTimes)) perFrame[t] = (perFrame[t] || 0) + 1;
+            const counts = Object.values(perFrame);
+            if (solver === 'dynamic') expect(counts.length, 'the dynamic solver keeps animating').toBeGreaterThan(10);
+            expect(Math.max(0, ...counts), 'callbacks in one animation frame').toBeLessThanOrEqual(1);
+        });
+    }
+
     test('button labels say "Current" for the magnetostatic solvers', async ({ page }) => {
         await openExplorer(page, TWO_CHARGES);
         await page.locator('#solver').selectOption('magnetostatic_wire');
@@ -301,6 +330,40 @@ test.describe('explorer (index.html)', () => {
         // drag the midpoint of the upper (test) dipole: translates it
         await drag(page, { x: 0.5, y: 0.3 }, { x: 0.5, y: 0.15 });
         expect(await snapshot(page)).toMatchSnapshot(['dipole-translate.png']);
+    });
+
+    test('ticking "Dipoles" pairs up the charges, which then move as rigid dipoles', async ({ page }) => {
+        // +1 and -1 near each other at the top, +2 and -2 at the bottom, and a lone +1
+        const state = {
+            charges: [
+                { x: 0.3, y: 0.3, charge: 1, id: 0 }, { x: 0.45, y: 0.3, charge: -1, id: 1 },
+                { x: 0.3, y: 0.7, charge: 2, id: 2 }, { x: 0.5, y: 0.7, charge: -2, id: 3 },
+                { x: 0.8, y: 0.5, charge: 1, id: 4 },
+            ],
+            solver: 'electrostatic_direct', showPotential: false, plotType: 'quiver', perCharge: false, dipoleMode: false,
+        };
+        await openExplorer(page, state);
+        const saved = () => page.evaluate(() => JSON.parse(localStorage.getItem('maxwell_state')));
+        await page.locator('#dipole').check();
+        await advance(page);
+        const s = await saved();
+        expect(s.dipoleMode).toBe(true);
+        expect(s.charges.map(c => c.dipoleWith)).toEqual([1, 0, 3, 2, undefined]);
+        // dragging the -2 charge rotates the bottom dipole about its centre; the others stay put
+        await drag(page, state.charges[3], { x: 0.4, y: 0.85 });
+        const after = (await saved()).charges;
+        const [p, m] = [after[2], after[3]];
+        const { width: W, height: H } = await page.locator(CANVAS).boundingBox();
+        expect(Math.abs(p.y - m.y)).toBeGreaterThan(0.05);   // it has rotated
+        expect(Math.hypot((p.x - m.x) * W, (p.y - m.y) * H)).toBeCloseTo(0.2 * W, 0);
+        expect((p.x + m.x) / 2).toBeCloseTo(0.4, 3);
+        expect((p.y + m.y) / 2).toBeCloseTo(0.7, 3);
+        expect(after[4]).toMatchObject({ x: 0.8, y: 0.5 });
+        // unticking and ticking again keeps the dipoles
+        await page.locator('#dipole').uncheck();
+        await page.locator('#dipole').check();
+        await advance(page);
+        expect((await saved()).charges.map(c => c.dipoleWith)).toEqual([1, 0, 3, 2, undefined]);
     });
 
     test('"Copy" puts the state on the clipboard and "Paste" restores it', async ({ page, context }) => {

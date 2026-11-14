@@ -115,12 +115,24 @@ export function rotateConfig(config, quarterTurns = 1) {
     return { ...config, name: `${config.name}-rot${quarterTurns * 90}`, charges };
 }
 
-/** Horizontal axis pairs on the standard canvas */
+/**
+ * Horizontal axis pairs on the standard canvas (see ruleAxisLine), with the default field-line
+ * settings and with the original ones (4 lines per unit charge, levels k / 4).
+ */
 export function axisConfigs() {
-    return {
-        unlike: cfg('axis-unlike', [{ x: 200, y: 167.5, charge: 2 }, { x: 468, y: 167.5, charge: -2 }]),
-        like: cfg('axis-like', [{ x: 200, y: 167.5, charge: 2 }, { x: 468, y: 167.5, charge: 2 }]),
+    const original = { linesPerUnitCharge: 4, levelOffset: 0 };
+    const pairs = {
+        unlike: [{ x: 200, y: 167.5, charge: 2 }, { x: 468, y: 167.5, charge: -2 }],
+        unlike1: [{ x: 200, y: 167.5, charge: 1 }, { x: 468, y: 167.5, charge: -1 }],
+        unlike3: [{ x: 200, y: 167.5, charge: 3 }, { x: 468, y: 167.5, charge: -3 }],
+        like: [{ x: 200, y: 167.5, charge: 2 }, { x: 468, y: 167.5, charge: 2 }],
     };
+    const out = {};
+    for (const [k, charges] of Object.entries(pairs)) {
+        out[k] = cfg(`axis-${k}`, charges);
+        out[`${k}-original`] = { ...cfg(`axis-${k}-original`, charges), ...original };
+    }
+    return out;
 }
 
 export function totalCharge(config) {
