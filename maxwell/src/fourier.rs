@@ -1,11 +1,13 @@
-// 2D FFTs of ndarray arrays (unnormalised, as rustfft), with the FFT plans cached per size: planning
-// is expensive for sizes with large prime factors (the default grid is 111 = 3 x 37) and these
-// transforms run every frame.
+// FFT plans cached per size (planning is expensive for sizes with large prime factors, and the
+// transforms built on them, freespace.rs's DST and streamfn.rs's DCT, run every frame), and 2D FFTs
+// of ndarray arrays (unnormalised, as rustfft; used by tests).
 
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
+#[cfg(test)]
 use ndarray::Array2;
+#[cfg(test)]
 use num_complex::Complex;
 use rustfft::{Fft, FftPlanner};
 
@@ -18,7 +20,7 @@ thread_local! {
     static PLANS: RefCell<Plans> = RefCell::new(Plans { planner: FftPlanner::new(), cache: HashMap::new() });
 }
 
-fn plan(n: usize, inverse: bool) -> Arc<dyn Fft<f64>> {
+pub(crate) fn plan(n: usize, inverse: bool) -> Arc<dyn Fft<f64>> {
     PLANS.with(|p| {
         let mut p = p.borrow_mut();
         if let Some(f) = p.cache.get(&(n, inverse)) {
@@ -30,6 +32,7 @@ fn plan(n: usize, inverse: bool) -> Arc<dyn Fft<f64>> {
     })
 }
 
+#[cfg(test)]
 fn fft_2d(array: &mut Array2<Complex<f64>>, inverse: bool) {
     let (nx, ny) = array.dim();
     let rows = plan(ny, inverse);
@@ -50,14 +53,17 @@ fn fft_2d(array: &mut Array2<Complex<f64>>, inverse: bool) {
     }
 }
 
+#[cfg(test)]
 pub fn array_fft(array: &mut Array2<Complex<f64>>) {
     fft_2d(array, false);
 }
 
+#[cfg(test)]
 pub fn array_ifft(array: &mut Array2<Complex<f64>>) {
     fft_2d(array, true);
 }
 
+#[cfg(test)]
 pub fn array_fft_renormalise(array: &mut Array2<Complex<f64>>) {
     let norm_factor = (array.len()) as f64;
     array.mapv_inplace(|x| x / norm_factor);

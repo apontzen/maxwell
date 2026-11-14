@@ -100,34 +100,39 @@ impl Dct {
 /// Least-squares solver for the stream function on the corners of the physical region. Holds the
 /// FFT plans, so keep one per geometry.
 pub struct StreamFunctionSolver {
-    m: usize,
-    dct: Dct,
+    mx: usize,
+    my: usize,
+    dct_x: Dct,
+    dct_y: Dct,
     eig: Vec<f64>, // eigenvalues of the weighted Neumann Laplacian, x-major
+}
+
+/// The number of corners of the physical region in x and y
+pub fn corner_dims(geometry: &Geometry) -> (usize, usize) {
+    (geometry.nx - 2 * geometry.nboundary + 1, geometry.ny - 2 * geometry.nboundary + 1)
 }
 
 impl StreamFunctionSolver {
     pub fn new(geometry: &Geometry) -> StreamFunctionSolver {
-        let nb = geometry.nboundary;
-        let np = geometry.nx - 2 * nb;
-        assert!(geometry.ny - 2 * nb == np, "stream function needs equal cell counts in x and y");
-        let m = np + 1;
+        let (mx, my) = corner_dims(geometry);
         let (wx, wy) = weights(geometry);
         // D^T D for the 1D Neumann chain of m nodes has DCT-II eigenvectors, eigenvalues 4 sin^2(pi k / 2m)
-        let lam: Vec<f64> = (0..m).map(|k| 4.0 * (std::f64::consts::PI * k as f64 / (2.0 * m as f64)).sin().powi(2)).collect();
-        let mut eig = vec![0.0; m * m];
-        for a in 0..m { for b in 0..m { eig[a * m + b] = wx * lam[a] + wy * lam[b]; } }
-        StreamFunctionSolver { m, dct: Dct::new(m), eig }
+        let lam = |m: usize| -> Vec<f64> { (0..m).map(|k| 4.0 * (std::f64::consts::PI * k as f64 / (2.0 * m as f64)).sin().powi(2)).collect() };
+        let (lx, ly) = (lam(mx), lam(my));
+        let mut eig = vec![0.0; mx * my];
+        for a in 0..mx { for b in 0..my { eig[a * my + b] = wx * lx[a] + wy * ly[b]; } }
+        StreamFunctionSolver { mx, my, dct_x: Dct::new(mx), dct_y: Dct::new(my), eig }
     }
 
-    /// Solve (wx Dx^T Dx + wy Dy^T Dy) psi = rhs (x-major, m*m) in place, with mean(psi) = 0.
+    /// Solve (wx Dx^T Dx + wy Dy^T Dy) psi = rhs (x-major, mx*my) in place, with mean(psi) = 0.
     fn solve(&mut self, rhs: &mut [f64]) {
-        let m = self.m;
-        for a in 0..m { self.dct.forward(rhs, a * m, 1); }
-        for b in 0..m { self.dct.forward(rhs, b, m); }
+        let (mx, my) = (self.mx, self.my);
+        for a in 0..mx { self.dct_y.forward(rhs, a * my, 1); }
+        for b in 0..my { self.dct_x.forward(rhs, b, my); }
         rhs[0] = 0.0;
-        for k in 1..m * m { rhs[k] /= self.eig[k]; }
-        for b in 0..m { self.dct.inverse(rhs, b, m); }
-        for a in 0..m { self.dct.inverse(rhs, a * m, 1); }
+        for k in 1..mx * my { rhs[k] /= self.eig[k]; }
+        for b in 0..my { self.dct_x.inverse(rhs, b, my); }
+        for a in 0..mx { self.dct_y.inverse(rhs, a * my, 1); }
     }
 }
 
@@ -140,21 +145,22 @@ fn weights(geometry: &Geometry) -> (f64, f64) {
 }
 
 /// The residual differences along x-segments (a, b) -> (a+1, b) and y-segments (a, b) -> (a, b+1)
-/// of the corner grid (m*m each, x-major; the last x-segment of each row / y-segment of each
+/// of the corner grid (mx*my each, x-major; the last x-segment of each row / y-segment of each
 /// column is unused and zero).
 pub(crate) fn residuals(geometry: &Geometry, elec_x: &Array2<f64>, elec_y: &Array2<f64>,
              flux_per_unit_charge: f64, xs: &[f64], ys: &[f64], qs: &[f64]) -> (Vec<f64>, Vec<f64>) {
     let nb = geometry.nboundary;
-    let m = geometry.nx - 2 * nb + 1;
+    let (mx, my) = corner_dims(geometry);
+    let mm = mx * my;
     let dx = geometry.delta_x();
     let dy = geometry.delta_y();
     // psi_sing at the corners (principal values); differences along segments are wrapped
     let nq = qs.len();
-    let mut theta = vec![0.0; nq * m * m];
+    let mut theta = vec![0.0; nq * mm];
     for k in 0..nq {
-        for a in 0..m {
-            for b in 0..m {
-                theta[(k * m + a) * m + b] = (b as f64 * dy - ys[k]).atan2(a as f64 * dx - xs[k]);
+        for a in 0..mx {
+            for b in 0..my {
+                theta[k * mm + a * my + b] = (b as f64 * dy - ys[k]).atan2(a as f64 * dx - xs[k]);
             }
         }
     }
@@ -197,16 +203,16 @@ pub(crate) fn residuals(geometry: &Geometry, elec_x: &Array2<f64>, elec_y: &Arra
     };
     let near2 = (REG_NEAR * s_reg).powi(2);
     let sing = |p0: usize, p1: usize| -> f64 {
-        let (a0, b0, a1, b1) = (p0 / m, p0 % m, p1 / m, p1 % m);
+        let (a0, b0, a1, b1) = (p0 / my, p0 % my, p1 / my, p1 % my);
         let (x0, y0, x1, y1) = (a0 as f64 * dx, b0 as f64 * dy, a1 as f64 * dx, b1 as f64 * dy);
         let (xm, ym) = (0.5 * (x0 + x1), 0.5 * (y0 + y1));
         let mut s = 0.0;
         for k in 0..nq {
             let d2 = (xm - xs[k]).powi(2) + (ym - ys[k]).powi(2);
             let dtheta = if d2 > far2 {
-                wrap(theta[k * m * m + p1] - theta[k * m * m + p0])
+                wrap(theta[k * mm + p1] - theta[k * mm + p0])
             } else if d2 > near2 {
-                wrap(theta[k * m * m + p1] - theta[k * m * m + p0]) - correction(k, x0, y0, x1, y1)
+                wrap(theta[k * mm + p1] - theta[k * mm + p0]) - correction(k, x0, y0, x1, y1)
             } else {
                 regularised(k, x0, y0, x1, y1)
             };
@@ -214,18 +220,18 @@ pub(crate) fn residuals(geometry: &Geometry, elec_x: &Array2<f64>, elec_y: &Arra
         }
         s * inv_two_pi
     };
-    let mut rx = vec![0.0; m * m];
-    let mut ry = vec![0.0; m * m];
+    let mut rx = vec![0.0; mm];
+    let mut ry = vec![0.0; mm];
     let fx = dx / flux_per_unit_charge;
     let fy = dy / flux_per_unit_charge;
-    for a in 0..m {
-        for b in 0..m {
-            let p = a * m + b;
-            if a + 1 < m {
+    for a in 0..mx {
+        for b in 0..my {
+            let p = a * my + b;
+            if a + 1 < mx {
                 // the face between cells (a, b-1) and (a, b) of the padded grid
-                rx[p] = -elec_y[[a + nb, b + nb - 1]] * fx - sing(p, p + m);
+                rx[p] = -elec_y[[a + nb, b + nb - 1]] * fx - sing(p, p + my);
             }
-            if b + 1 < m {
+            if b + 1 < my {
                 // the face between cells (a-1, b) and (a, b)
                 ry[p] = elec_x[[a + nb - 1, b + nb]] * fy - sing(p, p + 1);
             }
@@ -234,23 +240,23 @@ pub(crate) fn residuals(geometry: &Geometry, elec_x: &Array2<f64>, elec_y: &Arra
     (rx, ry)
 }
 
-/// psi_rest on the (nphys+1)^2 corners of the physical region, x-major ([a][b] at a*(n+1)+b), with
-/// mean zero.
+/// psi_rest on the corners of the physical region (corner_dims: mx * my), x-major ([a][b] at
+/// a * my + b), with mean zero.
 pub fn stream_function_rest(solver: &mut StreamFunctionSolver, geometry: &Geometry, elec_x: &Array2<f64>, elec_y: &Array2<f64>,
                             flux_per_unit_charge: f64, xs: &[f64], ys: &[f64], qs: &[f64]) -> Vec<f64> {
-    let m = solver.m;
+    let (mx, my) = (solver.mx, solver.my);
     let (rx, ry) = residuals(geometry, elec_x, elec_y, flux_per_unit_charge, xs, ys, qs);
     let (wx, wy) = weights(geometry);
     // normal equations: rhs = wx Dx^T rx + wy Dy^T ry, (Dx^T r)[a] = r[a-1] - r[a] (r[-1] = r[m-1] = 0)
-    let mut rhs = vec![0.0; m * m];
-    for a in 0..m {
-        for b in 0..m {
-            let p = a * m + b;
+    let mut rhs = vec![0.0; mx * my];
+    for a in 0..mx {
+        for b in 0..my {
+            let p = a * my + b;
             let mut v = 0.0;
-            if a > 0 { v += wx * rx[p - m]; }
-            if a + 1 < m { v -= wx * rx[p]; }
+            if a > 0 { v += wx * rx[p - my]; }
+            if a + 1 < mx { v -= wx * rx[p]; }
             if b > 0 { v += wy * ry[p - 1]; }
-            if b + 1 < m { v -= wy * ry[p]; }
+            if b + 1 < my { v -= wy * ry[p]; }
             rhs[p] = v;
         }
     }
@@ -291,15 +297,15 @@ pub struct GaugeHistory {
 
 /// Free-space stream function of point charges (principal values) at the corners.
 pub fn free_psi_at_corners(geometry: &Geometry, xs: &[f64], ys: &[f64], qs: &[f64]) -> Vec<f64> {
-    let m = geometry.nx - 2 * geometry.nboundary + 1;
+    let (mx, my) = corner_dims(geometry);
     let (dx, dy) = (geometry.delta_x(), geometry.delta_y());
-    let mut out = vec![0.0; m * m];
-    for a in 0..m {
-        for b in 0..m {
+    let mut out = vec![0.0; mx * my];
+    for a in 0..mx {
+        for b in 0..my {
             let (x, y) = (a as f64 * dx, b as f64 * dy);
             let mut s = 0.0;
             for k in 0..qs.len() { s += qs[k] * (y - ys[k]).atan2(x - xs[k]); }
-            out[a * m + b] = s / (2.0 * std::f64::consts::PI);
+            out[a * my + b] = s / (2.0 * std::f64::consts::PI);
         }
     }
     out
@@ -347,19 +353,19 @@ pub fn causal_offset(geometry: &Geometry, raw: &[f64], history: &GaugeHistory, b
                      positions: &[(f64, f64)], deposit_positions: &[(f64, f64)], lines_per_unit_charge: f64) -> Option<f64> {
     if history.positions.len() != positions.len() { return None; }
     let nb = geometry.nboundary;
-    let m = geometry.nx - 2 * nb + 1;
+    let (mx, my) = corner_dims(geometry);
     let (dx, dy) = (geometry.delta_x(), geometry.delta_y());
     let mut paths: Vec<_> = history.positions.iter().zip(positions.iter()).map(|(&p, &q)| (p, q)).collect();
     paths.extend(deposit_positions.iter().map(|&p| (p, p)));
-    let mut vals = Vec::with_capacity(m * m);
+    let mut vals = Vec::with_capacity(mx * my);
     // the corners next to the edge are skipped: their faces border the absorbing layer
-    for a in 2..m - 2 {
-        for b in 2..m - 2 {
+    for a in 2..mx - 2 {
+        for b in 2..my - 2 {
             let (x, y) = (a as f64 * dx, b as f64 * dy);
             if !clear_of_charges(x, y, EXCLUSION_CELLS * dx, EXCLUSION_CELLS * dy, &paths) { continue; }
             // psi at corner (a, b) changes with B_z at the Yee node of padded cell (a + nb - 1, b + nb - 1)
             let predicted = b_integral[[a + nb - 1, b + nb - 1]] / flux_per_unit_charge;
-            let p = a * m + b;
+            let p = a * my + b;
             vals.push(lines_per_unit_charge * (history.psi[p] + predicted - raw[p]));
         }
     }
@@ -376,12 +382,15 @@ mod tests {
     use super::*;
     use crate::fourier;
 
-    fn geometry() -> Geometry { Geometry { x_max: 668.0, y_max: 335.0, nx: 111, ny: 111, nboundary: 13 } }
+    // square cells on the default canvas: 111 x 56 physical cells (and a layer of 20)
+    const NX: usize = 151;
+    const NY: usize = 96;
+    fn geometry() -> Geometry { Geometry { x_max: 668.0, y_max: 335.0, nx: NX, ny: NY, nboundary: 20 } }
 
     fn fields() -> (Array2<f64>, Array2<f64>) {
-        let mut ex = Array2::<f64>::zeros((111, 111));
-        let mut ey = Array2::<f64>::zeros((111, 111));
-        for i in 0..111 { for j in 0..111 {
+        let mut ex = Array2::<f64>::zeros((NX, NY));
+        let mut ey = Array2::<f64>::zeros((NX, NY));
+        for i in 0..NX { for j in 0..NY {
             ex[[i, j]] = ((i * 7 + j * 3) % 11) as f64 * 10.0;
             ey[[i, j]] = ((i * 5 + j) % 13) as f64 * 10.0;
         } }
@@ -390,34 +399,34 @@ mod tests {
 
     /// Reference: the same least-squares problem solved by a periodic FFT of the mirrored grid.
     fn reference(g: &Geometry, rx: &[f64], ry: &[f64]) -> Vec<f64> {
-        let m = g.nx - 2 * g.nboundary + 1;
-        let n2 = 2 * m;
+        let (mx, my) = corner_dims(g);
+        let (n2x, n2y) = (2 * mx, 2 * my);
         let (wx, wy) = weights(g);
-        let mirror = |e: usize| if e < m { e } else { n2 - 1 - e };
+        let mirror = |e: usize, m: usize| if e < m { e } else { 2 * m - 1 - e };
         let ext_x = |e: usize, f: usize| -> f64 {
-            let fb = mirror(f);
-            if e < m - 1 { rx[e * m + fb] } else if e == m - 1 || e == n2 - 1 { 0.0 } else { -rx[(n2 - 2 - e) * m + fb] }
+            let fb = mirror(f, my);
+            if e < mx - 1 { rx[e * my + fb] } else if e == mx - 1 || e == n2x - 1 { 0.0 } else { -rx[(n2x - 2 - e) * my + fb] }
         };
         let ext_y = |e: usize, f: usize| -> f64 {
-            let ea = mirror(e);
-            if f < m - 1 { ry[ea * m + f] } else if f == m - 1 || f == n2 - 1 { 0.0 } else { -ry[ea * m + n2 - 2 - f] }
+            let ea = mirror(e, mx);
+            if f < my - 1 { ry[ea * my + f] } else if f == my - 1 || f == n2y - 1 { 0.0 } else { -ry[ea * my + n2y - 2 - f] }
         };
-        let mut rhs = Array2::<Complex<f64>>::zeros((n2, n2));
-        for e in 0..n2 { for f in 0..n2 {
-            let em = (e + n2 - 1) % n2; let fm = (f + n2 - 1) % n2;
+        let mut rhs = Array2::<Complex<f64>>::zeros((n2x, n2y));
+        for e in 0..n2x { for f in 0..n2y {
+            let em = (e + n2x - 1) % n2x; let fm = (f + n2y - 1) % n2y;
             rhs[[e, f]] = Complex::new(wx * (ext_x(em, f) - ext_x(e, f)) + wy * (ext_y(e, fm) - ext_y(e, f)), 0.0);
         } }
-        let mut op = Array2::<Complex<f64>>::zeros((n2, n2));
+        let mut op = Array2::<Complex<f64>>::zeros((n2x, n2y));
         op[[0, 0]] = Complex::new(2.0 * wx + 2.0 * wy, 0.0);
-        op[[1, 0]] = Complex::new(-wx, 0.0); op[[n2 - 1, 0]] = Complex::new(-wx, 0.0);
-        op[[0, 1]] = Complex::new(-wy, 0.0); op[[0, n2 - 1]] = Complex::new(-wy, 0.0);
+        op[[1, 0]] = Complex::new(-wx, 0.0); op[[n2x - 1, 0]] = Complex::new(-wx, 0.0);
+        op[[0, 1]] = Complex::new(-wy, 0.0); op[[0, n2y - 1]] = Complex::new(-wy, 0.0);
         fourier::array_fft(&mut op);
         fourier::array_fft(&mut rhs);
         rhs.zip_mut_with(&op, |r, o| { *r = if o.norm() > 1e-9 { *r / *o } else { Complex::new(0.0, 0.0) }; });
         fourier::array_ifft(&mut rhs);
-        let mut out = vec![0.0; m * m];
-        for a in 0..m { for b in 0..m { out[a * m + b] = rhs[[a, b]].re / (n2 * n2) as f64; } }
-        let mean = out.iter().sum::<f64>() / (m * m) as f64;
+        let mut out = vec![0.0; mx * my];
+        for a in 0..mx { for b in 0..my { out[a * my + b] = rhs[[a, b]].re / (n2x * n2y) as f64; } }
+        let mean = out.iter().sum::<f64>() / (mx * my) as f64;
         out.iter_mut().for_each(|v| *v -= mean);
         out
     }
@@ -455,15 +464,16 @@ mod tests {
     fn exact_for_a_curl_free_divergence_free_flux() {
         // a uniform field has a stream function: psi_rest must reproduce it exactly
         let g = geometry();
-        let ex = Array2::<f64>::from_elem((111, 111), 30.0);
-        let ey = Array2::<f64>::from_elem((111, 111), -20.0);
+        let ex = Array2::<f64>::from_elem((NX, NY), 30.0);
+        let ey = Array2::<f64>::from_elem((NX, NY), -20.0);
         let mut solver = StreamFunctionSolver::new(&g);
         let psi = stream_function_rest(&mut solver, &g, &ex, &ey, 4000.0, &[], &[], &[]);
-        let m = 86;
+        let (mx, my) = corner_dims(&g);
+        assert_eq!((mx, my), (112, 57));
         let (dx, dy) = (g.delta_x(), g.delta_y());
         // psi = (Ex y - Ey x) / flux_per_unit_charge + const
         let f = |a: usize, b: usize| (30.0 * b as f64 * dy + 20.0 * a as f64 * dx) / 4000.0;
-        let mean = (0..m * m).map(|p| f(p / m, p % m)).sum::<f64>() / (m * m) as f64;
-        for p in 0..m * m { assert!((psi[p] - (f(p / m, p % m) - mean)).abs() < 1e-9, "{}", p); }
+        let mean = (0..mx * my).map(|p| f(p / my, p % my)).sum::<f64>() / (mx * my) as f64;
+        for p in 0..mx * my { assert!((psi[p] - (f(p / my, p % my) - mean)).abs() < 1e-9, "{}", p); }
     }
 }

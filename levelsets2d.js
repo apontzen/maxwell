@@ -362,35 +362,36 @@ export function stagnationPoints(T) {
  */
 export function gridStagnationPoints(T, ev) {
     const R = T.rest;
-    const m = R.m, dx = R.dx, dy = R.dy;
-    const gx = new Float64Array(m * m), gy = new Float64Array(m * m);
+    // corners: mx * my, x-major (corner (a, b) at a * my + b)
+    const mx = R.mx, my = R.my, mm = mx * my, dx = R.dx, dy = R.dy;
+    const gx = new Float64Array(mm), gy = new Float64Array(mm);
     const nearSource = (x, y, r) => {
         for (let i = 0; i < T.n; i++) if ((x - T.xs[i]) ** 2 + (y - T.ys[i]) ** 2 < r * r) return true;
         return false;
     };
-    for (let a = 0; a < m; a++) for (let b = 0; b < m; b++) {
+    for (let a = 0; a < mx; a++) for (let b = 0; b < my; b++) {
         ev.grad(a * dx, b * dy);
-        gx[a * m + b] = ev.gx; gy[a * m + b] = ev.gy;
+        gx[a * my + b] = ev.gx; gy[a * my + b] = ev.gy;
     }
     // Dead zones: where |grad psi| is negligible within +-DEAD_WINDOW corners, psi is just noise
     // (e.g. where radiation has not arrived yet and the static field cancels). Contours there are
     // meaningless: nothing is seeded there and lines stop on entering one.
     const gmin = DEAD_LEVELS_PER_DIAGONAL / (T.lpu * T.diag);
-    const live = new Uint8Array(m * m);
-    for (let p = 0; p < m * m; p++) live[p] = gx[p] * gx[p] + gy[p] * gy[p] >= gmin * gmin ? 1 : 0;
-    const dead = new Uint8Array(m * m);
+    const live = new Uint8Array(mm);
+    for (let p = 0; p < mm; p++) live[p] = gx[p] * gx[p] + gy[p] * gy[p] >= gmin * gmin ? 1 : 0;
+    const dead = new Uint8Array(mm);
     let anyDead = false;
-    for (let a = 0; a < m; a++) for (let b = 0; b < m; b++) {
+    for (let a = 0; a < mx; a++) for (let b = 0; b < my; b++) {
         let ok = 0;
-        for (let i = Math.max(0, a - DEAD_WINDOW); i <= Math.min(m - 1, a + DEAD_WINDOW) && !ok; i++)
-            for (let j = Math.max(0, b - DEAD_WINDOW); j <= Math.min(m - 1, b + DEAD_WINDOW); j++)
-                if (live[i * m + j]) { ok = 1; break; }
-        if (!ok) { dead[a * m + b] = 1; anyDead = true; }
+        for (let i = Math.max(0, a - DEAD_WINDOW); i <= Math.min(mx - 1, a + DEAD_WINDOW) && !ok; i++)
+            for (let j = Math.max(0, b - DEAD_WINDOW); j <= Math.min(my - 1, b + DEAD_WINDOW); j++)
+                if (live[i * my + j]) { ok = 1; break; }
+        if (!ok) { dead[a * my + b] = 1; anyDead = true; }
     }
     T.dead = anyDead ? dead : null;
     const cellR = 2 * Math.hypot(dx, dy);
     const out = [];
-    const isDead = (a, b) => T.dead && dead[a * m + b];
+    const isDead = (a, b) => T.dead && dead[a * my + b];
     // Newton on grad psi = 0 from (x0, y0); null unless it converges within a cell of there.
     // (Converged at a step of 1e-6 cells: near an elongated extremum, i.e. a thin loop, the Hessian
     // is nearly singular and rounding errors in the gradient give steps far above machine precision.)
@@ -420,10 +421,10 @@ export function gridStagnationPoints(T, ev) {
     // (1) cells over whose corners both components of grad psi change sign. mask: bits for the
     // signs (+x, -x, +y, -y) of grad psi present at the cell's corners
     const sign = q => (gx[q] > 0 ? 1 : 2) | (gy[q] > 0 ? 4 : 8);
-    const mask = new Uint8Array(m * m);
-    for (let a = 0; a + 1 < m; a++) for (let b = 0; b + 1 < m; b++) {
-        const p = a * m + b;
-        mask[p] = sign(p) | sign(p + m) | sign(p + 1) | sign(p + m + 1);
+    const mask = new Uint8Array(mm);
+    for (let a = 0; a + 1 < mx; a++) for (let b = 0; b + 1 < my; b++) {
+        const p = a * my + b;
+        mask[p] = sign(p) | sign(p + my) | sign(p + 1) | sign(p + my + 1);
         if (mask[p] !== 15) continue;
         if (isDead(a, b) || isDead(a + 1, b) || isDead(a, b + 1) || isDead(a + 1, b + 1)) continue;
         const x = (a + 0.5) * dx, y = (b + 0.5) * dy;
@@ -441,19 +442,19 @@ export function gridStagnationPoints(T, ev) {
     // corners) and unwrapped.
     T.loopCentres = [];
     const ring = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];
-    const angles = new Float64Array(T.n * m * m).fill(NaN);   // lazily: from each source to each corner
+    const angles = new Float64Array(T.n * mm).fill(NaN);   // lazily: from each source to each corner
     const anglesAt = (i, j) => {
-        const p = (i * m + j) * T.n;
+        const p = (i * my + j) * T.n;
         if (T.n && Number.isNaN(angles[p]))
             for (let k = 0; k < T.n; k++) angles[p + k] = Math.atan2(j * dy - T.ys[k], i * dx - T.xs[k]);
         return p;
     };
     const discreteExtremum = (a, b) => {
-        const t0 = anglesAt(a, b), v0 = R.data[a * m + b];
+        const t0 = anglesAt(a, b), v0 = R.data[a * my + b];
         let pos = false, neg = false;
         for (const [u, v] of ring) {
             const t1 = anglesAt(a + u, b + v);
-            let d = R.data[(a + u) * m + b + v] - v0 + (T.ux * v * dy - T.uy * u * dx) * ev.c;
+            let d = R.data[(a + u) * my + b + v] - v0 + (T.ux * v * dy - T.uy * u * dx) * ev.c;
             for (let k = 0; k < T.n; k++) d += T.qs[k] * wrap(angles[t1 + k] - angles[t0 + k]) / TWO_PI;
             if (d > 0) pos = true; else neg = true;
             if (pos && neg) return false;
@@ -461,9 +462,9 @@ export function gridStagnationPoints(T, ev) {
         return true;
     };
     const near = 1.5 * Math.max(dx, dy);
-    for (let a = 1; a + 1 < m; a++) for (let b = 1; b + 1 < m; b++) {
-        const p = a * m + b;
-        if ((mask[p] | mask[p - 1] | mask[p - m] | mask[p - m - 1]) !== 15 || isDead(a, b)) continue;
+    for (let a = 1; a + 1 < mx; a++) for (let b = 1; b + 1 < my; b++) {
+        const p = a * my + b;
+        if ((mask[p] | mask[p - 1] | mask[p - my] | mask[p - my - 1]) !== 15 || isDead(a, b)) continue;
         const x = a * dx, y = b * dy;
         if (out.some(p => Math.abs(p.x - x) < near && Math.abs(p.y - y) < near)) continue;
         if (!nearSource(x, y, cellR) && discreteExtremum(a, b)) T.loopCentres.push({ x, y });
@@ -474,9 +475,9 @@ export function gridStagnationPoints(T, ev) {
 /** Grid models: is (x, y) in a dead zone (see gridStagnationPoints)? */
 export function inDeadZone(T, x, y) {
     if (!T.dead) return false;
-    const R = T.rest, m = R.m;
-    const a = Math.min(m - 1, Math.max(0, Math.round(x / R.dx))), b = Math.min(m - 1, Math.max(0, Math.round(y / R.dy)));
-    return T.dead[a * m + b] === 1;
+    const R = T.rest;
+    const a = Math.min(R.mx - 1, Math.max(0, Math.round(x / R.dx))), b = Math.min(R.my - 1, Math.max(0, Math.round(y / R.dy)));
+    return T.dead[a * R.my + b] === 1;
 }
 
 /** Move unsoftened stagnation points to the zeros of the softened field (2D Newton). */

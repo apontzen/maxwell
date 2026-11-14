@@ -14,6 +14,7 @@ mod geometry;
 mod contours;
 mod streamfn;
 mod absorber;
+mod freespace;
 
 const FIELD_SCALING: f64 = 20000.0;
 const SOFTEN: f64 = 5.0;
@@ -147,10 +148,19 @@ pub fn evaluate_grid_interpolated(field_config: &FieldConfiguration, grid: &Arra
 
 #[wasm_bindgen]
 impl FieldConfiguration {
+    /// Deprecated (cells are square only if nx / ny matches the region's aspect ratio): see
+    /// with_cell_size. The physical region has (nx - 2 nx/8) x (ny - 2 nx/8) cells, surrounded by the
+    /// absorbing layer.
     #[wasm_bindgen(constructor)]
     pub fn new(x_max: f64, y_max: f64, nx: usize, ny: usize) -> FieldConfiguration {
-        // the physical region has (nx - 2 nx/8) x (ny - 2 nx/8) cells, surrounded by the absorbing layer
         FieldConfiguration::with_geometry(absorber::padded_geometry(x_max, y_max, nx, ny))
+    }
+
+    /// A grid of (nearly) square cells of side close to `cell` covering the region x_max x y_max
+    /// (the nearest whole numbers of cells in x and y), surrounded by the absorbing layer.
+    pub fn with_cell_size(x_max: f64, y_max: f64, cell: f64) -> FieldConfiguration {
+        let n = |extent: f64| ((extent / cell).round() as usize).max(4);
+        FieldConfiguration::with_geometry(absorber::physical_geometry(x_max, y_max, n(x_max), n(y_max)))
     }
 }
 
@@ -249,9 +259,10 @@ impl FieldConfiguration {
     pub fn initialize_on_constraints(&mut self) {
         self.make_cic_grid();
 
-        let potential = self.stencils.del_squared_inv(self.cic_grid.as_ref().unwrap());
-        let (elec_x, elec_y) = self.stencils.grad_forward(&potential);
+        // the static field in free space (freespace.rs)
         let deposit = self.deposit();
+        let potential = freespace::potential(&self.geometry, self.cic_grid.as_ref().unwrap(), &absorber::deposited_totals(&self.geometry, &deposit));
+        let (elec_x, elec_y) = self.stencils.grad_forward(&potential);
         self.absorber = Some(absorber::Absorber::new(&self.geometry, &self.stencils, &deposit, &potential, self.simulation_time));
         self.elec_y = Some(elec_y);
         self.elec_x = Some(elec_x);
@@ -651,7 +662,8 @@ pub fn compute_electric_field_dynamic_to_buffer(field_configuration: &mut FieldC
 }
 
 /// Single-valued part of the stream function of the grid electric field (see streamfn.rs), on the
-/// corners of the physical region: (n+1)^2 values, x-major, where n = grid_physical_cells.
+/// corners of the physical region: (nx+1)(ny+1) values, x-major ((a, b) at a (ny+1) + b), where
+/// [nx, ny] = grid_physical_cells.
 /// xs, ys, qs are the true positions and charges of the sources whose point-charge stream function
 /// is added analytically. The additive constant chooses the drawn field lines: canonical for a
 /// static field; for the dynamic solver it evolves causally from one call to the next (lines ahead
@@ -707,10 +719,11 @@ const GAUGE_MAX_GAP: f64 = 20.0;
 /// Time constant of the relaxation to the canonical field lines once the field has settled (0.5 s)
 const GAUGE_RELAXATION_TIME: f64 = 100.0;
 
-/// Number of grid cells across the physical region (the same in x and y).
+/// Numbers of grid cells across the physical region in x and y.
 #[wasm_bindgen]
-pub fn grid_physical_cells(field_configuration: &FieldConfiguration) -> usize {
-    field_configuration.geometry.nx - 2 * field_configuration.geometry.nboundary
+pub fn grid_physical_cells(field_configuration: &FieldConfiguration) -> Vec<u32> {
+    let g = &field_configuration.geometry;
+    vec![(g.nx - 2 * g.nboundary) as u32, (g.ny - 2 * g.nboundary) as u32]
 }
 
 #[cfg(test)]
@@ -729,17 +742,17 @@ mod stream_function_tests {
         let ey = fc.elec_y.as_ref().unwrap();
         let psi = streamfn::stream_function_rest(&mut solver, g, ex, ey, flux, &xs, &ys, &qs);
         let (rx, ry) = streamfn::residuals(g, ex, ey, flux, &xs, &ys, &qs);
-        let m = g.nx - 2 * g.nboundary + 1;
+        let (mx, my) = streamfn::corner_dims(g);
         let (dx, dy) = (g.delta_x(), g.delta_y());
         let (mut worst, mut scale): (f64, f64) = (0.0, 1e-300);
-        for a in 0..m {
-            for b in 0..m {
-                let p = a * m + b;
-                if a + 1 < m {
+        for a in 0..mx {
+            for b in 0..my {
+                let p = a * my + b;
+                if a + 1 < mx {
                     scale = scale.max(rx[p].abs());
-                    if !exclude((a as f64 + 0.5) * dx, b as f64 * dy) { worst = worst.max((psi[p + m] - psi[p] - rx[p]).abs()); }
+                    if !exclude((a as f64 + 0.5) * dx, b as f64 * dy) { worst = worst.max((psi[p + my] - psi[p] - rx[p]).abs()); }
                 }
-                if b + 1 < m {
+                if b + 1 < my {
                     scale = scale.max(ry[p].abs());
                     if !exclude(a as f64 * dx, (b as f64 + 0.5) * dy) { worst = worst.max((psi[p + 1] - psi[p] - ry[p]).abs()); }
                 }
@@ -752,7 +765,7 @@ mod stream_function_tests {
     fn pure_radiation_is_reproduced_exactly() {
         // a coincident +-2 pair, one of them shaken: when they coincide again rho = 0 everywhere,
         // so the field is divergence-free and the stream function must reproduce every face flux
-        let mut fc = FieldConfiguration::new(668.0, 335.0, 111, 111);
+        let mut fc = FieldConfiguration::with_cell_size(668.0, 335.0, 6.0);
         let (x0, y0) = (334.0, 167.5);
         fc.charges = vec![Charge::new(x0, y0, 2.0), Charge::new(x0, y0, -2.0)];
         let step: f64 = fc.stable_timestep();
@@ -774,7 +787,7 @@ mod stream_function_tests {
         let mut prev: Option<Vec<f64>> = None;
         let mut steps = vec![];
         for k in 0..48 {
-            let mut fc = FieldConfiguration::new(668.0, 335.0, 111, 111);
+            let mut fc = FieldConfiguration::with_cell_size(668.0, 335.0, 6.0);
             fc.charges = vec![Charge::new(466.0 + 0.25 * k as f64, 165.0 + 0.125 * k as f64, 3.0), Charge::new(200.4, 167.5, -3.0)];
             fc.initialize_on_constraints();
             let xs: Vec<f64> = fc.charges.iter().map(|c| c.x).collect();
@@ -798,7 +811,7 @@ mod stream_function_tests {
         // charges at cell centres (no snapping offset): outside the smearing kernels the misfit is
         // only the difference between the (anisotropic) smeared charge and a point charge, a small
         // fraction of the spacing of the field lines (1/4 in units of charge)
-        let mut fc = FieldConfiguration::new(668.0, 335.0, 111, 111);
+        let mut fc = FieldConfiguration::with_cell_size(668.0, 335.0, 6.0);
         let (dx, dy) = (fc.geometry.delta_x(), fc.geometry.delta_y());
         let c1 = (30.5 * dx, 40.5 * dy);
         let c2 = (55.5 * dx, 44.5 * dy);
@@ -828,8 +841,8 @@ mod dynamic_solver_tests {
 
     fn physical(fc: &FieldConfiguration) -> impl Iterator<Item = (usize, usize)> {
         let nb = fc.geometry.nboundary;
-        let n = fc.geometry.nx - nb;
-        (nb..n).flat_map(move |i| (nb..n).map(move |j| (i, j)))
+        let (nx, ny) = (fc.geometry.nx - nb, fc.geometry.ny - nb);
+        (nb..nx).flat_map(move |i| (nb..ny).map(move |j| (i, j)))
     }
 
     /// max |E - E_poisson| over the physical region, relative to max |E_poisson|
@@ -848,7 +861,7 @@ mod dynamic_solver_tests {
     }
 
     fn pair() -> FieldConfiguration {
-        let mut fc = FieldConfiguration::new(668.0, 335.0, 111, 111);
+        let mut fc = FieldConfiguration::with_cell_size(668.0, 335.0, 6.0);
         fc.charges = vec![Charge::new(467.6, 167.5, 3.0), Charge::new(200.4, 167.5, -3.0)];
         fc.ensure_initialized();
         fc
@@ -882,7 +895,7 @@ mod dynamic_solver_tests {
         run(&mut fc, 600.0, |fc, t| {
             fc.charges[0] = Charge::new(467.6 - 0.37 * t / 16.0, 167.5 + 0.23 * t / 16.0, 3.0);
             if t > 20.0 {
-                let mut p = FieldConfiguration::new(668.0, 335.0, 111, 111);
+                let mut p = FieldConfiguration::with_cell_size(668.0, 335.0, 6.0);
                 p.charges = fc.charges_at_last_tick.clone();
                 p.make_cic_grid();
                 let rho = p.cic_grid.as_ref().unwrap();
@@ -901,7 +914,7 @@ mod dynamic_solver_tests {
     #[test]
     fn radiation_leaves_through_the_absorbing_layer() {
         // a coincident +-2 pair, one shaken for one period: rho = 0 afterwards, so all field is radiation
-        let mut fc = FieldConfiguration::new(668.0, 335.0, 111, 111);
+        let mut fc = FieldConfiguration::with_cell_size(668.0, 335.0, 6.0);
         fc.charges = vec![Charge::new(334.0, 167.5, 2.0), Charge::new(334.0, 167.5, -2.0)];
         fc.ensure_initialized();
         let energy = |fc: &FieldConfiguration| -> f64 {
@@ -953,12 +966,12 @@ mod causal_field_line_tests {
     /// Largest change (in line spacings, modulo whole spacings) of psi between a and b over the corners
     /// at least `r` px from the centre (and 2 corners in from the edge)
     fn far_change(fc: &FieldConfiguration, a: &[f64], b: &[f64], r: f64) -> (f64, usize) {
-        let m = fc.geometry.nx - 2 * fc.geometry.nboundary + 1;
+        let (mx, my) = streamfn::corner_dims(&fc.geometry);
         let (dx, dy) = (fc.geometry.delta_x(), fc.geometry.delta_y());
         let (mut worst, mut n) = (0.0f64, 0);
-        for i in 2..m - 2 { for j in 2..m - 2 {
+        for i in 2..mx - 2 { for j in 2..my - 2 {
             if (i as f64 * dx - CENTRE.0).hypot(j as f64 * dy - CENTRE.1) < r { continue; }
-            let d = a[i * m + j] - b[i * m + j];
+            let d = a[i * my + j] - b[i * my + j];
             worst = worst.max((d - d.round()).abs());
             n += 1;
         } }
@@ -968,7 +981,7 @@ mod causal_field_line_tests {
     #[test]
     fn field_lines_outside_the_light_cone_do_not_move() {
         // spin a +-2 dipole one full turn in 0.6 s; c = 1 px per internal time unit (= 5 ms)
-        let mut fc = FieldConfiguration::new(668.0, 335.0, 111, 111);
+        let mut fc = FieldConfiguration::with_cell_size(668.0, 335.0, 6.0);
         fc.charges = dipole(0.0);
         fc.ensure_initialized();
         let before = drawn_psi(&mut fc);
@@ -991,7 +1004,7 @@ mod causal_field_line_tests {
 
     #[test]
     fn settled_field_lines_match_the_static_ones() {
-        let mut fc = FieldConfiguration::new(668.0, 335.0, 111, 111);
+        let mut fc = FieldConfiguration::with_cell_size(668.0, 335.0, 6.0);
         fc.charges = dipole(0.0);
         fc.ensure_initialized();
         drawn_psi(&mut fc);
@@ -1002,7 +1015,7 @@ mod causal_field_line_tests {
             frame(&mut fc);
             psi = drawn_psi(&mut fc);
         }
-        let mut fresh = FieldConfiguration::new(668.0, 335.0, 111, 111);
+        let mut fresh = FieldConfiguration::with_cell_size(668.0, 335.0, 6.0);
         fresh.charges = fc.charges.clone();
         fresh.ensure_initialized();
         let reference = drawn_psi(&mut fresh);
@@ -1012,7 +1025,7 @@ mod causal_field_line_tests {
 
     #[test]
     fn repeated_calls_do_not_change_the_lines() {
-        let mut fc = FieldConfiguration::new(668.0, 335.0, 111, 111);
+        let mut fc = FieldConfiguration::with_cell_size(668.0, 335.0, 6.0);
         fc.charges = dipole(0.3);
         fc.ensure_initialized();
         drawn_psi(&mut fc);
@@ -1029,7 +1042,7 @@ mod causal_field_line_tests {
 #[cfg(test)]
 mod vacuum_comparison {
     use super::*;
-    fn run_case(fc: &mut FieldConfiguration, off: (f64, f64), co: usize, pos: &dyn Fn(f64) -> Vec<(f64, f64, f64)>, np: usize) -> Vec<Vec<f64>> {
+    fn run_case(fc: &mut FieldConfiguration, off: (f64, f64), co: (usize, usize), pos: &dyn Fn(f64) -> Vec<(f64, f64, f64)>, np: (usize, usize)) -> Vec<Vec<f64>> {
         fc.charges = pos(0.0).iter().map(|&(x, y, q)| Charge::new(x + off.0, y + off.1, q)).collect();
         fc.ensure_initialized();
         let nb = fc.geometry.nboundary;
@@ -1042,7 +1055,7 @@ mod vacuum_comparison {
             if f % 60 == 0 {
                 let (ex, ey, bz) = (fc.elec_x.as_ref().unwrap(), fc.elec_y.as_ref().unwrap(), fc.mag_z.as_ref().unwrap());
                 let mut v = vec![];
-                for i in 0..np { for j in 0..np { let (a, b) = (i + nb + co, j + nb + co); v.push(ex[[a, b]]); v.push(ey[[a, b]]); v.push(bz[[a, b]]); } }
+                for i in 0..np.0 { for j in 0..np.1 { let (a, b) = (i + nb + co.0, j + nb + co.1); v.push(ex[[a, b]]); v.push(ey[[a, b]]); v.push(bz[[a, b]]); } }
                 snaps.push(v);
             }
         }
@@ -1051,30 +1064,89 @@ mod vacuum_comparison {
         p.charges = fc.charges.clone(); p.initialize_on_constraints();
         let (ex, ey) = (p.elec_x.as_ref().unwrap(), p.elec_y.as_ref().unwrap());
         let mut st = vec![];
-        for i in 0..np { for j in 0..np { let (a, b) = (i + nb + co, j + nb + co); st.push(ex[[a, b]]); st.push(ey[[a, b]]); st.push(0.0); } }
+        for i in 0..np.0 { for j in 0..np.1 { let (a, b) = (i + nb + co.0, j + nb + co.1); st.push(ex[[a, b]]); st.push(ey[[a, b]]); st.push(0.0); } }
         snaps.iter().map(|v| v.iter().zip(st.iter()).map(|(a, b)| a - b).collect()).collect()
     }
     #[test]
     fn the_canvas_behaves_like_vacuum() {
-        let np = 85usize; let (dx, dy) = (668.0 / np as f64, 335.0 / np as f64);
+        let np = (111usize, 56usize); let (dx, dy) = (668.0 / np.0 as f64, 335.0 / np.1 as f64);
         let rms = |v: &[f64]| (v.iter().map(|x| x * x).sum::<f64>() / v.len() as f64).sqrt();
         let shake = |t: f64| -> Vec<(f64, f64, f64)> { let y = if t < 300.0 { 167.5 + 25.0 * (2.0 * std::f64::consts::PI * t / 300.0).sin() } else { 167.5 }; vec![(334.0, y, 2.0), (334.0, 167.5, -2.0)] };
         let drag = |t: f64| -> Vec<(f64, f64, f64)> { let u = (t / 300.0).min(1.0); vec![(467.6 + 60.0 * u, 167.5 + 20.0 * u, 3.0), (200.4, 167.5, -3.0)] };
         // largest allowed difference from vacuum (relative to the peak of the transient) at 1..6 s:
-        // radiation is absorbed almost perfectly; after a drag the periodic images of the grid's
-        // static field (absent in vacuum) dominate the difference until the field has settled
-        let limits = [("shake", [1e-4, 2e-3, 2e-3, 1e-3, 5e-4, 2e-4]), ("drag", [0.06, 0.06, 0.06, 0.05, 0.04, 0.03])];
+        // radiation is absorbed almost perfectly; after a drag the retarded target of the absorbing
+        // layer (the static field of retarded positions, low-pass filtered) differs a little from
+        // the true induction field until the field has settled. (With the periodic static field the
+        // grid had before, its images made this 10x larger.)
+        let limits = [("shake", [1e-5, 3e-4, 3e-4, 2e-4, 2e-4, 2e-4]), ("drag", [1e-5, 2e-3, 8e-3, 1.2e-2, 1e-2, 6e-3])];
         for ((name, limit), pos) in limits.iter().zip([&shake as &dyn Fn(f64) -> Vec<(f64, f64, f64)>, &drag]) {
-            let mut big = { let n = 5 * np; FieldConfiguration::with_geometry(Geometry { x_max: n as f64 * dx, y_max: n as f64 * dy, nx: n + 40, ny: n + 40, nboundary: 20 }) };
-            let r = run_case(&mut big, (2.0 * np as f64 * dx, 2.0 * np as f64 * dy), 2 * np, pos, np);
+            let mut big = FieldConfiguration::with_geometry(absorber::physical_geometry(5.0 * 668.0, 5.0 * 335.0, 5 * np.0, 5 * np.1));
+            let r = run_case(&mut big, (2.0 * np.0 as f64 * dx, 2.0 * np.1 as f64 * dy), (2 * np.0, 2 * np.1), pos, np);
             let peak = r.iter().map(|v| rms(v)).fold(0.0f64, f64::max);
-            let mut fc = FieldConfiguration::new(668.0, 335.0, 111, 111);
-            let s = run_case(&mut fc, (0.0, 0.0), 0, pos, np);
+            let mut fc = FieldConfiguration::with_cell_size(668.0, 335.0, 6.0);
+            assert_eq!((fc.geometry.nx - 40, fc.geometry.ny - 40), np);
+            let s = run_case(&mut fc, (0.0, 0.0), (0, 0), pos, np);
             for (k, (a, b)) in s.iter().zip(r.iter()).enumerate() {
                 let e = rms(&a.iter().zip(b.iter()).map(|(x, y)| x - y).collect::<Vec<_>>()) / peak;
                 println!("{} at {} s: difference from vacuum / peak {:.1e}", name, k + 1, e);
                 assert!(e < limit[k], "{} at {} s: difference from vacuum {:.2e} (limit {:.0e})", name, k + 1, e, limit[k]);
             }
+        }
+    }
+}
+
+/// The grid's static field against the exact field of point charges in vacuum (2D: E = Q r / 2 pi r^2),
+/// away from the charges (their Gaussian smearing and the grid's resolution matter within a few cells).
+#[cfg(test)]
+mod static_vacuum_tests {
+    use super::*;
+
+    /// Angles (degrees) between the grid's and the exact field, at the E_x and E_y nodes of the
+    /// physical region further than `r_min` px from every charge
+    fn angle_errors(charges: &[(f64, f64, f64)], r_min: f64) -> Vec<f64> {
+        let mut fc = FieldConfiguration::with_cell_size(668.0, 335.0, 6.0);
+        fc.charges = charges.iter().map(|&(x, y, q)| Charge::new(x, y, q)).collect();
+        fc.reset_fields();
+        fc.ensure_initialized();
+        let g = fc.geometry.clone();
+        let (dx, dy, nb) = (g.delta_x(), g.delta_y(), g.nboundary as f64);
+        let (ex, ey) = (fc.elec_x.as_ref().unwrap(), fc.elec_y.as_ref().unwrap());
+        let exact = |x: f64, y: f64| -> Option<(f64, f64)> {
+            let (mut u, mut v) = (0.0, 0.0);
+            for &(cx, cy, q) in charges {
+                let (rx, ry) = (x - cx, y - cy);
+                let r2 = rx * rx + ry * ry;
+                if r2 < r_min * r_min { return None; }
+                u += q * rx / r2; v += q * ry / r2;
+            }
+            Some((u, v))
+        };
+        let mut out = vec![];
+        for i in g.nboundary..g.nx - g.nboundary - 1 {
+            for j in g.nboundary..g.ny - g.nboundary - 1 {
+                // the field at the corner (i + 1, j + 1): the mean of the neighbouring staggered components
+                let (x, y) = ((i as f64 + 1.0 - nb) * dx, (j as f64 + 1.0 - nb) * dy);
+                let Some((u, v)) = exact(x, y) else { continue };
+                let gx = 0.5 * (ex[[i, j]] + ex[[i, j + 1]]);
+                let gy = 0.5 * (ey[[i, j]] + ey[[i + 1, j]]);
+                out.push((gx * v - gy * u).atan2(gx * u + gy * v).abs().to_degrees());
+            }
+        }
+        out.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        out
+    }
+
+    #[test]
+    fn the_static_field_is_that_of_charges_in_vacuum() {
+        for (name, charges) in [
+            ("horizontal dipole", vec![(0.3 * 668.0, 167.5, 2.0), (0.7 * 668.0, 167.5, -2.0)]),
+            ("vertical dipole", vec![(334.0, 0.35 * 335.0, 2.0), (334.0, 0.65 * 335.0, -2.0)]),
+            ("single charge", vec![(250.0, 120.0, 1.0)]),
+        ] {
+            let a = angle_errors(&charges, 40.0);
+            let (median, p99, worst) = (a[a.len() / 2], a[a.len() * 99 / 100], a[a.len() - 1]);
+            println!("{}: angle to the vacuum field beyond 40 px: median {:.2} deg, 99% {:.2}, max {:.2} ({} points)", name, median, p99, worst, a.len());
+            assert!(median < 0.3 && p99 < 1.5, "{}: median {:.2} deg, 99% {:.2}", name, median, p99);
         }
     }
 }

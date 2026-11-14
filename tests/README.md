@@ -135,7 +135,9 @@ solvers); see [issue #3](https://github.com/apontzen/maxwell/issues/3). Their ge
   field lines radiated by a shaken dipole, which must not flicker (a loop present in the frames
   before and after one must be in that one too); a line along the axis of a +-3 pair between the charges and none outwards;
   and, for the dynamic solver, that field lines outside the light cone do not move while a charge
-  is dragged (the drawn levels are chosen causally, see `maxwell/src/streamfn.rs`). The lecture examples, random configurations and a net
+  is dragged (the drawn levels are chosen causally, see `maxwell/src/streamfn.rs`); and that away
+  from the charges the lines of both grid solvers are those of charges in vacuum (the direct
+  solver's) to within 2% of the line spacing. The lecture examples, random configurations and a net
   charge are used for the Fourier solver; for the dynamic solver, lecture 14 before and after a
   drag and lecture 16 after shaking a charge.
 - The Rust unit tests (`cargo test --lib` in `maxwell/`) check the stream function's least-squares
@@ -144,7 +146,9 @@ solvers); see [issue #3](https://github.com/apontzen/maxwell/issues/3). Their ge
   They also check the dynamic solver: static charges keep their field exactly, Gauss's law holds
   during sub-cell drags, the field settles to the static one after a drag, radiation leaves
   through the absorbing layer (`maxwell/src/absorber.rs`), and the canvas behaves like vacuum
-  (compared with the same simulation on a grid 5x larger); and the causal choice of field lines: psi outside the light cone of
+  (compared with the same simulation on a grid 5x larger); the static field is that of charges in
+  vacuum (free-space boundary conditions, `maxwell/src/freespace.rs`) away from the charges, and
+  the free-space Poisson solve is exact on the grid; and the causal choice of field lines: psi outside the light cone of
   a spinning dipole is unchanged, and settled lines match the static ones.
 - `solvers.spec.js` checks the solver registry (`solvers.js`): which model is used in
   each mode, the deprecated alias, and that forces and fields come from the same 2D model.

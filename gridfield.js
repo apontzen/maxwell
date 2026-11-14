@@ -25,10 +25,10 @@ export const GRID_KIND = 'electrostatic_grid';
 // Must match charge_normalization * cell area in maxwell/src/lib.rs (FieldConfiguration::new)
 export const GRID_FLUX_PER_UNIT_CHARGE = 4000.0;
 
-/** Bicubic (Catmull-Rom) interpolation of corner data; mirrored (Neumann) beyond the edges. */
+/** Bicubic (Catmull-Rom) interpolation of corner data (mx * my, x-major); mirrored (Neumann) beyond the edges. */
 export class CornerInterpolant {
-    constructor(data, m, dx, dy) {
-        this.data = data; this.m = m; this.dx = dx; this.dy = dy;
+    constructor(data, mx, my, dx, dy) {
+        this.data = data; this.mx = mx; this.my = my; this.dx = dx; this.dy = dy;
         this.val = 0; this.gx = 0; this.gy = 0;
         this.wx = new Float64Array(4); this.wy = new Float64Array(4);
         this.dwx = new Float64Array(4); this.dwy = new Float64Array(4);
@@ -42,25 +42,25 @@ export class CornerInterpolant {
     }
     /** Sets this.val, this.gx, this.gy at (x, y). */
     eval(x, y) {
-        const m = this.m;
+        const mx = this.mx, my = this.my;
         let u = x / this.dx, v = y / this.dy;
         // clamp to the region (the tracer never needs values further out)
-        u = Math.min(Math.max(u, 0), m - 1); v = Math.min(Math.max(v, 0), m - 1);
+        u = Math.min(Math.max(u, 0), mx - 1); v = Math.min(Math.max(v, 0), my - 1);
         let i = Math.floor(u), j = Math.floor(v);
-        if (i > m - 2) i = m - 2;
-        if (j > m - 2) j = m - 2;
+        if (i > mx - 2) i = mx - 2;
+        if (j > my - 2) j = my - 2;
         CornerInterpolant.weights(u - i, this.wx, this.dwx);
         CornerInterpolant.weights(v - j, this.wy, this.dwy);
         const d = this.data;
         let f = 0, fx = 0, fy = 0;
         for (let a = 0; a < 4; a++) {
             let ia = i - 1 + a;
-            if (ia < 0) ia = -1 - ia; else if (ia >= m) ia = 2 * m - 1 - ia;
-            const row = ia * m;
+            if (ia < 0) ia = -1 - ia; else if (ia >= mx) ia = 2 * mx - 1 - ia;
+            const row = ia * my;
             let s = 0, sy = 0;
             for (let b = 0; b < 4; b++) {
                 let jb = j - 1 + b;
-                if (jb < 0) jb = -1 - jb; else if (jb >= m) jb = 2 * m - 1 - jb;
+                if (jb < 0) jb = -1 - jb; else if (jb >= my) jb = 2 * my - 1 - jb;
                 const z = d[row + jb];
                 s += this.wy[b] * z; sy += this.dwy[b] * z;
             }
@@ -79,14 +79,13 @@ export class CornerInterpolant {
 export function makeGridFieldModel({ field, charges, uniformX = 0, uniformY = 0, width, height,
                                      linesPerUnitCharge = LINES_PER_UNIT_CHARGE, levelOffset = LEVEL_OFFSET }) {
     const sources = charges.filter(c => !c.isTestCharge);
-    const n = grid_physical_cells(field);
-    const m = n + 1;
+    const [nx, ny] = grid_physical_cells(field);
     const xs = Float64Array.from(sources, c => c.x);
     const ys = Float64Array.from(sources, c => c.y);
     const qs = Float64Array.from(sources, c => c.charge);
     field.set_lines_per_unit_charge(linesPerUnitCharge);   // psi's constant is chosen modulo the line spacing
     const data = compute_grid_stream_function_rest(field, xs, ys, qs);
-    const psiRest = new CornerInterpolant(data, m, width / n, height / n);
+    const psiRest = new CornerInterpolant(data, nx + 1, ny + 1, width / nx, height / ny);
     const K = GRID_FLUX_PER_UNIT_CHARGE / (2 * Math.PI);
     // E from the stream function (the field the lines follow): E = 2 pi K rot(grad psi). Used for
     // the direction arrows and Gaussian-surface crossings, so that they agree with the lines.

@@ -54,9 +54,9 @@ export async function main(params) {
     let uniformElecY = 0.0;
 
     let nextChargeStrength = 1;
-    let cic_max_resolution = 128;
-    let cic_target_logical_pixel_per_cell = 6;
-    let cic_resolution;
+    // grid solvers: square cells of this many CSS px, but at most this many across the canvas
+    const GRID_CELL_PX = 6;
+    const GRID_MAX_CELLS = 128;
 
     const dpr = window.devicePixelRatio || 1;
 
@@ -237,9 +237,8 @@ export async function main(params) {
 
 
     function updateSolverType(is_user_update = false) {
-        cic_resolution = Math.min(cic_max_resolution, Math.max(1, Math.floor(rect.width / cic_target_logical_pixel_per_cell)));
-
-        field = new FieldConfiguration(rect.width, rect.height, cic_resolution, cic_resolution);
+        const cell = Math.max(GRID_CELL_PX, Math.max(rect.width, rect.height) / GRID_MAX_CELLS);
+        field = FieldConfiguration.with_cell_size(rect.width, rect.height, cell);
         
         dynamic = !!SOLVERS[solver].dynamic;
 

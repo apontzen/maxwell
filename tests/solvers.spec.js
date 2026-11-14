@@ -123,7 +123,7 @@ test('field lines per unit charge and the level offset: defaults, and set per em
         const charges = [{ x: 200, y: 167.5, charge: 2 }, { x: 468, y: 167.5, charge: -2 }];
         const ends = (lines) => lines.filter(l => l.from === 0).length;   // lines leaving the +2 charge
         const run = (solver, fieldLines) => {
-            const field = new wasm.FieldConfiguration(W, H, 111, 111);
+            const field = wasm.FieldConfiguration.with_cell_size(W, H, 6);
             field.set_charges(charges);
             field.reset_fields();
             const m = s.makeRenderModel(solver, { field, charges, uniformX: 0, uniformY: 0, width: W, height: H, fieldLines }).model2D;

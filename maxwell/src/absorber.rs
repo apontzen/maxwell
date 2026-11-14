@@ -14,7 +14,9 @@
 // static field of the charges where they were when the light now arriving at each cell left them
 // (the retarded positions), so that the layer, like everything else, only learns that a charge
 // has moved when the wave from it arrives. Once everything has settled the target is exactly the
-// (periodic Poisson) static field of the charges, which is then the steady state of the solver.
+// free-space static field of the charges (freespace.rs), which is then the steady state of the
+// solver: inside the layer the field is pulled to the target, and a field that agrees with it there
+// and has the same divergence (the charges) and curl (none) inside is the same field everywhere.
 //
 // The target is the (forward-difference) gradient of a retarded potential: the exact static
 // potential of a reference configuration plus, for each charge that has moved recently,
@@ -28,6 +30,7 @@
 
 use std::collections::VecDeque;
 use ndarray::Array2;
+use crate::freespace;
 use crate::geometry::Geometry;
 use crate::stencil::Stencils;
 
@@ -46,7 +49,12 @@ const TARGET_INTERVAL: f64 = 2.0;
 /// as many cells as it always has (nx - 2 nx/8, ny - 2 nx/8) and the layer PML_CELLS round it.
 pub fn padded_geometry(x_max: f64, y_max: f64, nx: usize, ny: usize) -> Geometry {
     let old_boundary = nx / 8;
-    Geometry { x_max, y_max, nx: nx - 2 * old_boundary + 2 * PML_CELLS, ny: ny - 2 * old_boundary + 2 * PML_CELLS, nboundary: PML_CELLS }
+    physical_geometry(x_max, y_max, nx - 2 * old_boundary, ny - 2 * old_boundary)
+}
+
+/// The geometry with `npx` x `npy` cells in the physical region and the layer PML_CELLS round it.
+pub fn physical_geometry(x_max: f64, y_max: f64, npx: usize, npy: usize) -> Geometry {
+    Geometry { x_max, y_max, nx: npx + 2 * PML_CELLS, ny: npy + 2 * PML_CELLS, nboundary: PML_CELLS }
 }
 
 /// Conductivity profile along one axis with n cells, a layer of `w` cells each side of thickness
@@ -62,18 +70,43 @@ fn profile(n: usize, w: usize, thickness: f64, offset: f64) -> Vec<f64> {
     }).collect()
 }
 
-/// The static potential (del^-2 rho) of point charges deposited as in FieldConfiguration::make_cic_grid,
-/// whose forward-difference gradient is their static field. Charges: (x, y, charge * charge_normalization).
+/// The charges, (x, y, charge * charge_normalization), inside the physical region (the others are
+/// not deposited: see FieldConfiguration::make_cic_grid), as (x, y, total charge of the deposit)
+/// for freespace::potential.
+pub fn deposited_totals(geometry: &Geometry, charges: &[(f64, f64, f64)]) -> Vec<(f64, f64, f64)> {
+    let area = geometry.delta_x() * geometry.delta_y();
+    charges.iter().filter(|&&(x, y, _)| x >= 0.0 && x <= geometry.x_max && y >= 0.0 && y <= geometry.y_max)
+        .map(|&(x, y, q)| (x, y, q * area)).collect()
+}
+
+/// The free-space static potential (del^2 phi = rho, see freespace.rs) of point charges deposited as
+/// in FieldConfiguration::make_cic_grid, whose forward-difference gradient is their static field.
+/// Charges: (x, y, charge * charge_normalization).
 pub fn static_potential(geometry: &Geometry, stencils: &Stencils, charges: &[(f64, f64, f64)]) -> Array2<f64> {
+    let inside = deposited_totals(geometry, charges);
+    let area = geometry.delta_x() * geometry.delta_y();
     let mut rho = Array2::<f64>::zeros((geometry.nx, geometry.ny));
-    for &(x, y, q) in charges {
-        // (as make_cic_grid: charges outside the physical region are ignored)
-        if x < 0.0 || x > geometry.x_max || y < 0.0 || y > geometry.y_max { continue; }
+    for &(x, y, q) in &inside {
         let (sx, wx) = stencils.gaussian_weights(x, geometry.delta_x());
         let (sy, wy) = stencils.gaussian_weights(y, geometry.delta_y());
-        stencils.add_separable(&mut rho, sx, &wx, sy, &wy, q);
+        stencils.add_separable(&mut rho, sx, &wx, sy, &wy, q / area);
     }
-    stencils.del_squared_inv(&rho)
+    freespace::potential(geometry, &rho, &inside)
+}
+
+/// The free-space potential of a unit charge (in the units of `charges` of static_potential, i.e.
+/// charge * charge_normalization = 1) at the centre of cell (nx, ny) of a grid twice the size
+/// of `geometry` in each direction (so that shifting it by up to the grid's size never wraps), and
+/// that cell.
+fn unit_charge_table(geometry: &Geometry) -> (Array2<f64>, (f64, f64)) {
+    let (dx, dy, w) = (geometry.delta_x(), geometry.delta_y(), geometry.nboundary);
+    let (nx, ny) = (2 * geometry.nx, 2 * geometry.ny);
+    let big = Geometry { x_max: (nx - 2 * w) as f64 * dx, y_max: (ny - 2 * w) as f64 * dy, nx, ny, nboundary: w };
+    let stencils = Stencils::new(big.clone());
+    let (gi, gj) = (geometry.nx, geometry.ny);
+    let gx = (gi as f64 - w as f64 + 0.5) * dx;
+    let gy = (gj as f64 - w as f64 + 0.5) * dy;
+    (static_potential(&big, &stencils, &[(gx, gy, 1.0)]), (gi as f64, gj as f64))
 }
 
 /// A charge position prepared for lookups in the unit-charge table (see Absorber::prepare)
@@ -101,8 +134,9 @@ pub struct Absorber {
     /// where the target is (within one)
     layer: Vec<(usize, usize)>,
     layer_target: Vec<(usize, usize)>,
-    /// static potential of a unit charge at the centre of cell green_centre
-    green: Array2<f64>,
+    /// free-space potential of a unit charge at the centre of cell green_centre of a grid twice the
+    /// size (unit_charge_table), made when first needed
+    green: Option<Array2<f64>>,
     green_centre: (f64, f64),
     /// exact static potential of the reference configuration, and that configuration (x, y, q * norm)
     reference_potential: Array2<f64>,
@@ -136,17 +170,12 @@ impl Absorber {
         };
         let layer = near(2);
         let layer_target = near(1);
-        // the unit charge at the centre of the middle cell
-        let (gi, gj) = (nx / 2, ny / 2);
-        let gx = (gi as f64 - w as f64 + 0.5) * dx;
-        let gy = (gj as f64 - w as f64 + 0.5) * dy;
-        let green = static_potential(geometry, stencils, &[(gx, gy, 1.0)]);
         let (target_x, target_y) = stencils.grad_forward(static_potential_);
         Absorber {
             sigma_x, sigma_y, sigma_x_half, sigma_y_half,
             bzx: Array2::zeros((nx, ny)), bzy: Array2::zeros((nx, ny)),
             target_x, target_y, potential: static_potential_.clone(), potential_slow: static_potential_.clone(), filter_time: TARGET_FILTER_TIME,
-            layer, layer_target, green, green_centre: (gi as f64, gj as f64),
+            layer, layer_target, green: None, green_centre: (0.0, 0.0),
             reference_potential: static_potential_.clone(), reference: charges.to_vec(),
             history: charges.iter().map(|&(x, y, _)| VecDeque::from(vec![(f64::NEG_INFINITY, x, y)])).collect(),
             last_motion: f64::NEG_INFINITY, last_update: time,
@@ -156,32 +185,30 @@ impl Absorber {
         }
     }
 
-    /// For a charge at (x, y): the shift into the unit-charge table (integer parts, wrapped, and
-    /// fractional parts), the same for every cell
+    /// For a charge at (x, y) in the physical region: the shift into the unit-charge table (integer
+    /// and fractional parts), the same for every cell
     fn prepare(&self, geometry: &Geometry, x: f64, y: f64) -> Prepared {
         let w = geometry.nboundary as f64;
         // the charge's position in units of cells, relative to the centre of cell 0
         let u = x / geometry.delta_x() + w - 0.5;
         let v = y / geometry.delta_y() + w - 0.5;
-        let (a, b) = (self.green_centre.0 - u, self.green_centre.1 - v);
+        // (for a charge in the physical region and any cell of the grid, the shifted index and the
+        // next one lie within the table)
+        let (a, b) = ((self.green_centre.0 - u).max(0.0), (self.green_centre.1 - v).max(0.0));
         let (a0, b0) = (a.floor(), b.floor());
-        Prepared {
-            di: (a0 as isize).rem_euclid(geometry.nx as isize) as usize, fa: a - a0,
-            dj: (b0 as isize).rem_euclid(geometry.ny as isize) as usize, fb: b - b0,
-        }
+        Prepared { di: a0 as usize, fa: a - a0, dj: b0 as usize, fb: b - b0 }
     }
 
     /// The unit charge's potential at cell (i, j) for a charge at a prepared position: the table
-    /// shifted by a (fractional) number of cells, interpolated bilinearly, wrapping round the grid.
+    /// shifted by a (fractional) number of cells, interpolated bilinearly.
     #[inline]
     fn green_at(&self, i: usize, j: usize, p: &Prepared) -> f64 {
-        let (nx, ny) = self.green.dim();
-        let mut i0 = i + p.di; if i0 >= nx { i0 -= nx; }
-        let i1 = if i0 + 1 < nx { i0 + 1 } else { 0 };
-        let mut j0 = j + p.dj; if j0 >= ny { j0 -= ny; }
-        let j1 = if j0 + 1 < ny { j0 + 1 } else { 0 };
-        let (fa, fb, t) = (p.fa, p.fb, &self.green);
-        (1.0 - fa) * ((1.0 - fb) * t[[i0, j0]] + fb * t[[i0, j1]]) + fa * ((1.0 - fb) * t[[i1, j0]] + fb * t[[i1, j1]])
+        let t = self.green.as_ref().expect("unit-charge table");
+        let (nx, ny) = t.dim();
+        let i0 = (i + p.di).min(nx - 2);
+        let j0 = (j + p.dj).min(ny - 2);
+        let (fa, fb) = (p.fa, p.fb);
+        (1.0 - fa) * ((1.0 - fb) * t[[i0, j0]] + fb * t[[i0, j0 + 1]]) + fa * ((1.0 - fb) * t[[i0 + 1, j0]] + fb * t[[i0 + 1, j0 + 1]])
     }
 
     fn green(&self, geometry: &Geometry, i: usize, j: usize, x: f64, y: f64) -> f64 {
@@ -251,6 +278,11 @@ impl Absorber {
             return;
         }
 
+        if self.green.is_none() {
+            let (table, centre) = unit_charge_table(geometry);
+            self.green = Some(table);
+            self.green_centre = centre;
+        }
         // the unit charge's field from the reference positions, and from the current positions of
         // charges that have moved (cached until they move again)
         let n = self.layer.len();

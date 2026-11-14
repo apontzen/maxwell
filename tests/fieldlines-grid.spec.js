@@ -40,7 +40,7 @@ async function gridLines(page, configs) {
         const out = [];
         for (const cfg of configs) {
             const { width: W, height: H } = cfg;
-            const field = new wasm.FieldConfiguration(W, H, 111, 111);
+            const field = wasm.FieldConfiguration.with_cell_size(W, H, 6);
             let charges = cfg.charges.map(c => ({ ...c }));
             const sources = () => charges.filter(c => !c.isTestCharge);
             field.set_charges(sources());
@@ -239,7 +239,7 @@ test('the shaken dipole radiates closed field lines', async ({ page }) => {
         const { makeGridFieldModel } = await import('/gridfield.js');
         const { electricFieldLines } = await import('/fieldlines2d.js');
         const W = 668, H = 335, frameMs = 1000 / 60;
-        const field = new wasm.FieldConfiguration(W, H, 111, 111);
+        const field = wasm.FieldConfiguration.with_cell_size(W, H, 6);
         const charges = [{ x: 334, y: 167.5, charge: 2 }, { x: 334, y: 167.5, charge: -2 }];
         field.set_charges(charges);
         const counts = [];
@@ -273,7 +273,7 @@ test('radiated closed field lines do not flicker', async ({ page }) => {
         const { makeGridFieldModel } = await import('/gridfield.js');
         const { electricFieldLines } = await import('/fieldlines2d.js');
         const W = 668, H = 335, frameMs = 1000 / 60;
-        const field = new wasm.FieldConfiguration(W, H, 111, 111);
+        const field = wasm.FieldConfiguration.with_cell_size(W, H, 6);
         const charges = [{ x: 334, y: 167.5, charge: Q }, { x: 334, y: 167.5, charge: -Q }];
         field.set_charges(charges);
         // levels are equivalent modulo the charges' gcd (q here)
@@ -338,7 +338,7 @@ test('dynamic solver: field lines outside the light cone do not move during a dr
             { name: '+-3 pair, +3 dragged', charges: [{ x: 467.6, y: 167.5, charge: 3 }, { x: 200.4, y: 167.5, charge: -3 }], move: [60, 20] },
             { name: 'single +2 dragged', charges: [{ x: 250, y: 150, charge: 2 }], move: [-40, 30] },
         ]) {
-            const field = new wasm.FieldConfiguration(W, H, 111, 111);
+            const field = wasm.FieldConfiguration.with_cell_size(W, H, 6);
             const charges = scenario.charges.map(c => ({ ...c }));
             const start = { ...charges[0] };
             field.set_charges(charges);
@@ -409,7 +409,7 @@ test('grid solvers: a +-3 pair has a field line along its axis between the charg
         const charges = [{ x: 467.6, y: 167.5, charge: 3 }, { x: 200.4, y: 167.5, charge: -3 }];
         const out = [];
         for (const dynamic of [false, true]) {
-            const field = new wasm.FieldConfiguration(668, 335, 111, 111);
+            const field = wasm.FieldConfiguration.with_cell_size(668, 335, 6);
             field.set_charges(charges);
             if (!dynamic) field.reset_fields();
             const lines = electricFieldLines(makeGridFieldModel({ field, charges, width: 668, height: 335 }), { width: 668, height: 335 });
@@ -460,4 +460,52 @@ test('dynamic solver in the UI: far field lines stay still while a charge is dra
     }
     await page.mouse.up();
     expect(jumps).toEqual([]);
+});
+
+// With free-space boundaries and square cells, the grid solvers' field lines are those of the direct
+// (line-charge) solver away from the charges: every point of a grid line further than 30 px from the
+// charges lies on the exact level, psi_exact(point) = the line's level (modulo the charges), to within
+// a small fraction of the line spacing. (With the periodic Poisson solve and 2:1 cells they had,
+// lines were displaced by up to most of a spacing.)
+test('grid solvers: field lines are those of charges in vacuum away from the charges', async ({ page }) => {
+    await page.goto('/tests/blank.html');
+    const problems = await page.evaluate(async () => {
+        const wasm = await import('/maxwell/out/maxwell.js');
+        await wasm.default();
+        const { makeGridFieldModel } = await import('/gridfield.js');
+        const { makeFieldModel, LINE_CHARGE_KIND } = await import('/fieldmodels.js');
+        const { electricFieldLines } = await import('/fieldlines2d.js');
+        const W = 668, H = 335;
+        const configs = {
+            'horizontal +-2': [{ x: 0.3 * W, y: 0.5 * H, charge: 2 }, { x: 0.7 * W, y: 0.5 * H, charge: -2 }],
+            'vertical +-2': [{ x: 0.5 * W, y: 0.35 * H, charge: 2 }, { x: 0.5 * W, y: 0.65 * H, charge: -2 }],
+            '+-3 (lecture 14)': [{ x: 0.7 * W, y: 0.5 * H, charge: 3 }, { x: 0.3 * W, y: 0.5 * H, charge: -3 }],
+            'single +2': [{ x: 250, y: 120, charge: 2 }],
+            'four charges': [{ x: 200, y: 120, charge: 2 }, { x: 460, y: 220, charge: -2 }, { x: 330, y: 80, charge: 1 }, { x: 330, y: 260, charge: -1 }],
+        };
+        const out = [];
+        for (const [name, charges] of Object.entries(configs)) {
+            const exact = makeFieldModel(LINE_CHARGE_KIND, { charges, width: W, height: H });
+            const N = exact.linesPerUnitCharge;
+            const gcd = (a, b) => b ? gcd(b, a % b) : a;
+            const G = charges.reduce((g, c) => gcd(g, Math.round(N * Math.abs(c.charge))), 0) / N;
+            for (const dynamic of [false, true]) {
+                const field = wasm.FieldConfiguration.with_cell_size(W, H, 6);
+                field.set_charges(charges);
+                if (!dynamic) field.reset_fields();
+                const lines = electricFieldLines(makeGridFieldModel({ field, charges, width: W, height: H }), { width: W, height: H });
+                let worst = 0, at = null, n = 0;
+                for (const l of lines) for (const [x, y] of l.points) {
+                    if (x < 0 || y < 0 || x > W || y > H || charges.some(c => Math.hypot(x - c.x, y - c.y) < 30)) continue;
+                    let d = l.level - exact.streamFunctionAt(x, y);
+                    d = N * (d - G * Math.round(d / G));
+                    n++;
+                    if (Math.abs(d) > worst) { worst = Math.abs(d); at = [x, y]; }
+                }
+                out.push(`${name}${dynamic ? ' (dynamic)' : ''}: ${n} points, worst ${worst.toFixed(3)} line spacings at (${at ? at.map(v => v.toFixed(0)) : '-'})`);
+            }
+        }
+        return out;
+    });
+    for (const p of problems) expect(Number(p.match(/worst ([0-9.]+)/)[1]), p).toBeLessThan(0.02);
 });

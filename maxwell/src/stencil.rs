@@ -1,6 +1,4 @@
 use ndarray::{Array2};
-use num_complex::Complex;
-use crate::fourier;
 use crate::geometry::Geometry;
 
 /// The smoothing Gaussian applied to charges and currents has sigma = 2 cells, truncated at 4 sigma.
@@ -8,9 +6,7 @@ pub const SMOOTHING_SIGMA_CELLS: f64 = 2.0;
 const SMOOTHING_HALF_WIDTH: isize = 8;
 
 pub struct Stencils {
-    pub del_squared_inv: Option<Array2<Complex<f64>>>,
     geometry: Geometry,
-
 }
 
 #[allow(dead_code)]
@@ -30,25 +26,7 @@ pub enum DifferenceType {
 
 impl Stencils {
     pub fn new(geometry: Geometry) -> Stencils {
-        let mut s = Stencils { del_squared_inv: None, geometry };
-        s.init_inv_laplacian();
-        s
-    }
-
-    fn init_inv_laplacian(&mut self) {
-        let mut del_squared = self.make_laplacian_stencil();
-        fourier::array_fft(&mut del_squared);
-        let mut del_squared_inv = del_squared.clone();
-        self.invert_fourier_stencil(&mut del_squared_inv);
-        fourier::array_fft_renormalise(&mut del_squared_inv);
-        self.del_squared_inv = Some(del_squared_inv);
-    }
-
-    /// del^-2 rho on the periodic grid (k = 0 mode dropped)
-    pub fn del_squared_inv(&self, rho: &Array2<f64>) -> Array2<f64> {
-        let mut phi = rho.clone();
-        self.apply_fourier_stencil(&mut phi, self.del_squared_inv.as_ref().unwrap());
-        phi
+        Stencils { geometry }
     }
 
     /// The forward-difference gradient of phi (as used for the static field)
@@ -58,45 +36,6 @@ impl Stencils {
         self.apply_grad(phi, &mut gx, StencilType::GradX, DifferenceType::Forward);
         self.apply_grad(phi, &mut gy, StencilType::GradY, DifferenceType::Forward);
         (gx, gy)
-    }
-
-    fn apply_fourier_stencil(&self, array: &mut Array2<f64>, fourier_stencil: &Array2<Complex<f64>>) {
-        let mut result = Array2::<Complex<f64>>::zeros(array.dim());
-        result.zip_mut_with(array, |r, &a| *r = Complex::new(a, 0.0));
-        fourier::array_fft(&mut result);
-        (result) *= fourier_stencil;
-        fourier::array_ifft(&mut result);
-        array.zip_mut_with(&result, |a, &r| *a = r.re);
-    }
-
-
-    fn invert_fourier_stencil(&self, array: &mut ndarray::Array2<Complex<f64>>) {
-        let slice = array.as_slice_mut().unwrap();
-        let max_abs_val = slice.iter().map(|x| x.norm()).max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)).unwrap_or(0.0);
-        if max_abs_val == 0.0 {
-            return;
-        } else {
-            slice.iter_mut().for_each(|x| *x = 
-                if x.norm()>max_abs_val*1e-8 {1.0/(*x)} else {Complex::new(0.0, 0.0)});
-        }
-    }
-
-    pub fn make_laplacian_stencil(&self) -> Array2<Complex<f64>> {
-        let mut result = Array2::<Complex<f64>>::zeros((self.geometry.nx, self.geometry.ny));
-        let dx = self.geometry.delta_x();
-        let dy = self.geometry.delta_y();
-
-        let dx2_inv = Complex::new(1./(dx*dx), 0.0);
-        let dy2_inv = Complex::new(1./(dy*dy), 0.0);
-
-        
-        result[[0,0]] = -2.0*dx2_inv + -2.0*dy2_inv;
-        result[[self.geometry.nx-1,0]] = dx2_inv;
-        result[[1,0]] = dx2_inv;
-        result[[0,self.geometry.ny-1]] = dy2_inv;
-        result[[0,1]] = dy2_inv;
-
-        result
     }
 
     /// 1D weights of the smoothing Gaussian centred on the (sub-cell) position `pos` along an axis
