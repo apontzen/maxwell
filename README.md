@@ -1,14 +1,21 @@
 # MEME: an interactive electromagnetism visualiser
 
 MEME draws electric and magnetic fields of charges and currents that you can drag around:
-arrow ("quiver") plots, field lines, equipotentials, forces and torques, Gaussian surfaces, and a
-simulation of Maxwell's equations in which moving charges radiate. It runs in the browser: the
-numerical core is Rust compiled to WebAssembly (`maxwell/`), and the drawing and user interface
-are plain JavaScript modules.
+arrow ("quiver") plots, field lines, equipotentials, forces and torques, Gaussian surfaces.
+It includes a simulation of Maxwell's equations in which moving charges radiate. It runs 
+in the browser: the numerical core is Rust compiled to WebAssembly (`maxwell/`), and the 
+drawing and user interface are plain JavaScript modules. 
 
-It is used in the lecture notes of `apontzen/du_electromagnetism`, which include this repository as
-the `MEME` submodule. [HOW_IT_WORKS.md](HOW_IT_WORKS.md) explains the physics and the numerical
-methods.
+It is licenced under BSD.
+
+It was written in 2024 by Andrew Pontzen for Durham University [electromagnetism lectures](https://electromagnetism.pontzen.uk),
+and you can access the latest published version here: [MEME](https://electromagnetism.pontzen.uk/MEME/).
+
+While originally hand-coded, by 2026, Claude Code was capable of implementing this kind of physics 
+in-browser, and the code was updated and improved. 
+
+[HOW_IT_WORKS.md](HOW_IT_WORKS.md) explains the physics and the numerical methods (written
+by Claude in 2026).
 
 ## Building
 
@@ -89,6 +96,9 @@ The state's keys:
 | `dipoleMode` | Treat charges with `dipoleWith` as rigid dipoles. |
 | `linesPerUnitCharge`, `fieldLineOffset` | Electric field-line density: lines per unit charge (default 5), and the offset of the drawn levels as a fraction of the line spacing (default 0.5). See HOW_IT_WORKS.md. |
 
+Note that the `charges` are interpreted as currents directed through the +z axis (out of the screen) 
+in the case of magnetic field solvers.
+
 The solvers:
 
 | `solver` | Model |
@@ -107,7 +117,7 @@ Optional attributes add controls to an embed: `fieldlines-checkbox`, `percharge-
 ## Testing
 
 The regression tests (Playwright, in a real browser) and the Rust unit tests are described in
-[tests/README.md](tests/README.md). In short:
+[tests/README.md](tests/README.md) and can be run with:
 
 ```bash
 npm ci
