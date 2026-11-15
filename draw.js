@@ -197,8 +197,27 @@ function drawCharges(ctx, charges, selectedCharge) {
         ctx.fill();
         changeLineStyleIfSelected(ctx, charge, selectedCharge);
         ctx.stroke();
-
+        drawChargeSign(ctx, charge);
     });
+}
+
+/** A + or - in the middle of an electric charge (white; on the pale test charges, red or blue). */
+function drawChargeSign(ctx, charge) {
+    if (charge.charge === 0) return;
+    const h = chargeSize / 2;   // half-length of the bars
+    ctx.save();
+    ctx.strokeStyle = charge.isTestCharge ? (charge.charge > 0 ? 'red' : 'blue') : 'white';
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'butt';
+    ctx.beginPath();
+    ctx.moveTo(charge.x - h, charge.y);
+    ctx.lineTo(charge.x + h, charge.y);
+    if (charge.charge > 0) {
+        ctx.moveTo(charge.x, charge.y - h);
+        ctx.lineTo(charge.x, charge.y + h);
+    }
+    ctx.stroke();
+    ctx.restore();
 }
 
 function changeLineStyleIfSelected(ctx, charge, selectedCharge) {
