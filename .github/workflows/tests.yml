@@ -16,6 +16,9 @@ jobs:
           rustup update 1.90.0 && rustup default 1.90.0
           rustup target add wasm32-unknown-unknown
           cargo install wasm-pack@0.13.1
+      - name: Rust unit tests
+        run: cargo test --release --lib
+        working-directory: maxwell
       - name: Build WebAssembly module
         run: wasm-pack build --target web -d out
         working-directory: maxwell

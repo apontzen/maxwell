@@ -2,6 +2,7 @@ import init, { init_panic_hook, FieldConfiguration } from './maxwell/out/maxwell
 
 import { draw, getChargeFromPoint } from './draw.js';
 import { SOLVERS, canonicalSolver, effectiveSolver, isMagnetic, makeRenderModel } from './solvers.js';
+import { pairDipoles, dropDanglingPartners, nextChargeId } from './dipoles.js';
 
 const DYNAMIC_RUNTIME_SECONDS = 10;
 const DYNAMIC_RUNTIME_MS = DYNAMIC_RUNTIME_SECONDS * 1000;
@@ -54,9 +55,9 @@ export async function main(params) {
     let uniformElecY = 0.0;
 
     let nextChargeStrength = 1;
-    let cic_max_resolution = 128;
-    let cic_target_logical_pixel_per_cell = 6;
-    let cic_resolution;
+    // grid solvers: square cells of this many CSS px, but at most this many across the canvas
+    const GRID_CELL_PX = 6;
+    const GRID_MAX_CELLS = 128;
 
     const dpr = window.devicePixelRatio || 1;
 
@@ -66,6 +67,7 @@ export async function main(params) {
 
     let showPotential = false;
     let perCharge = false;
+    let linesPerUnitCharge = null, fieldLineOffset = null;   // null: the defaults (fieldmodels.js)
     // The solver chosen by the user / stored in the JSON state (canonical name). What is actually
     // drawn uses effectiveSolver(solver, plotType): in field-line mode 3D solvers are replaced by
     // their 2D counterparts (see solvers.js).
@@ -105,11 +107,15 @@ export async function main(params) {
     }
 
     
-    function animationIsRunning() {
-        return animation_request_id !== null && dynamic;
+    // At most one animation frame is ever pending. drawVectorField() is also called directly (e.g. on
+    // clicking a charge), and it calls continueAnimation(): without this guard, every such call
+    // started another animation loop in dynamic mode, all of which redrew every frame.
+    function framePending() {
+        return animation_request_id !== null;
     }
 
     function continueAnimation() {
+        if(framePending()) return;
         if(dynamic && last_interaction_time !== null && (performance.now() - last_interaction_time) < DYNAMIC_RUNTIME_MS) {
             animation_request_id = window.requestAnimationFrame(tickField);
         }
@@ -118,7 +124,7 @@ export async function main(params) {
     function postUserInteraction() {
         last_interaction_time = performance.now();
         saveState();
-        if(!animationIsRunning())
+        if(!framePending())
             animation_request_id = window.requestAnimationFrame(tickField);
     }
 
@@ -223,6 +229,9 @@ export async function main(params) {
 
         if(dipoleCheckbox !== null) {
             dipoleMode = dipoleCheckbox.checked;
+            // ticking it pairs up the charges not yet in dipoles (dipoles.js)
+            if(dipoleMode && event !== undefined && event.target === dipoleCheckbox)
+                pairDipoles(charges);
         }
     
         updateSolverType(true);
@@ -232,9 +241,8 @@ export async function main(params) {
 
 
     function updateSolverType(is_user_update = false) {
-        cic_resolution = Math.min(cic_max_resolution, Math.max(1, Math.floor(rect.width / cic_target_logical_pixel_per_cell)));
-
-        field = new FieldConfiguration(rect.width, rect.height, cic_resolution, cic_resolution);
+        const cell = Math.max(GRID_CELL_PX, Math.max(rect.width, rect.height) / GRID_MAX_CELLS);
+        field = FieldConfiguration.with_cell_size(rect.width, rect.height, cell);
         
         dynamic = !!SOLVERS[solver].dynamic;
 
@@ -283,7 +291,10 @@ export async function main(params) {
             uniformElecX: uniformElecX * rect.height, 
             uniformElecY: uniformElecY * rect.width,
             dipoleMode: dipoleMode,
-            extraDrawInfo: extraDrawInfo
+            extraDrawInfo: extraDrawInfo,
+            // only if set in the state loaded (otherwise the defaults in fieldmodels.js apply)
+            ...(linesPerUnitCharge != null && { linesPerUnitCharge }),
+            ...(fieldLineOffset != null && { fieldLineOffset }),
         });
     }
 
@@ -326,6 +337,11 @@ export async function main(params) {
 
             if (state.extraDrawInfo !== undefined)
                 extraDrawInfo = state.extraDrawInfo;
+
+            // electric field lines: lines per unit charge, and the offset of the drawn levels as a
+            // fraction of the line spacing (fieldmodels.js; defaults there if not given)
+            linesPerUnitCharge = state.linesPerUnitCharge ?? null;
+            fieldLineOffset = state.fieldLineOffset ?? null;
 
             updateSolverType();
 
@@ -373,23 +389,24 @@ export async function main(params) {
     function tickField(time_now) {
         animation_request_id = null;
 
-        let dt = 0;
-        if (last_time === null) {
-            last_time = time_now;
-        } else {
-            dt = time_now - last_time;
-        }
+        // The first frame of an animation advances by one nominal frame, so that the field catches
+        // up with charges that have moved since the last frame (see below)
+        let dt = last_time === null ? 1000 / 60 : time_now - last_time;
 
         dt /= 5; // convert from ms to internal time units
 
-        const dx = rect.width / cic_resolution;
+        // Give the solver the charges' current positions before ticking, so that by the time this
+        // frame is drawn the field's charges are where the charges are drawn. (Otherwise the field
+        // lags by a frame, and the field lines, whose point-charge part is at the drawn positions,
+        // jitter while a charge is dragged.)
+        field.set_charges(charges.filter(c => !c.isTestCharge));
 
         // Try to get forward in time by dt, but abandon if it takes too long (more than 20ms)
         const performance_time_start = performance.now();
         const max_time_ms = 20.0;
 
         while (dt > 0.0 && performance.now() - performance_time_start < max_time_ms) {
-            const step = Math.min(0.1 * dx , dt);
+            const step = Math.min(field.stable_timestep(), dt);
             field.tick(step);
             dt -= step;
         }
@@ -423,6 +440,7 @@ export async function main(params) {
         const renderModel = makeRenderModel(effectiveSolver(solver, plotType), {
             field, charges, uniformX: uniformElecX, uniformY: uniformElecY,
             width: rect.width, height: rect.height, perCharge,
+            fieldLines: { linesPerUnitCharge, levelOffset: fieldLineOffset },
         });
 
         let forces = null;
@@ -482,6 +500,7 @@ export async function main(params) {
     function deleteCharge(charge) {
         if(!allowAddDeleteCharge) return;
         charges = charges.filter(c => c !== charge);
+        dropDanglingPartners(charges);   // its dipole partner, if any, is now free
         field.set_charges(charges);
     }
 
@@ -546,12 +565,10 @@ export async function main(params) {
     }
 
 
-    let charge_id = 0;
-
     function addCharge(x, y, charge) {
         if(!allowAddDeleteCharge) return;
-        charges.push({x, y, charge, id: charge_id});
-        charge_id++;
+        // (a fresh id: dipoles refer to their charges by id)
+        charges.push({x, y, charge, id: nextChargeId(charges)});
         deselectCharge();
         field.set_charges(charges);
         drawVectorField();

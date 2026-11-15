@@ -250,19 +250,28 @@ export function countDifferentPixels(a, b) {
     return n;
 }
 
-/** Average colour of the canvas in a small square around a normalised point. */
-export async function colourAt(page, { x, y }, radius = 3, index = 0) {
-    return canvas(page, index).evaluate((c, { x, y, radius }) => {
+/**
+ * Average colour of the canvas on a ring of radii 6.5-8.5 CSS px round a normalised point: where a
+ * charge's disc (radius 10) is, clear of the + or - drawn in its middle (half-length 5).
+ */
+export async function colourAt(page, { x, y }, index = 0) {
+    return canvas(page, index).evaluate((c, { x, y }) => {
         const rect = c.getBoundingClientRect();
         const scale = c.width / c.clientWidth;
         const px = Math.round(x * rect.width * scale), py = Math.round(y * rect.height * scale);
-        const r = Math.round(radius * scale);
-        const d = c.getContext('2d').getImageData(px - r, py - r, 2 * r + 1, 2 * r + 1).data;
+        const r0 = 6.5 * scale, r1 = 8.5 * scale, R = Math.ceil(r1);
+        const d = c.getContext('2d').getImageData(px - R, py - R, 2 * R + 1, 2 * R + 1).data;
         const sum = [0, 0, 0, 0];
-        for (let i = 0; i < d.length; i += 4) for (let k = 0; k < 4; k++) sum[k] += d[i + k];
-        const n = d.length / 4;
+        let n = 0;
+        for (let j = -R; j <= R; j++) for (let i = -R; i <= R; i++) {
+            const r = Math.hypot(i, j);
+            if (r < r0 || r > r1) continue;
+            const o = ((j + R) * (2 * R + 1) + (i + R)) * 4;
+            for (let k = 0; k < 4; k++) sum[k] += d[o + k];
+            n++;
+        }
         return sum.map(s => Math.round(s / n));
-    }, { x, y, radius });
+    }, { x, y });
 }
 
 /** Rough classification of an RGBA colour, used for semantic checks. */

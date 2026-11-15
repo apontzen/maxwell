@@ -22,9 +22,13 @@
 //                             uniform field, as the WASM compute_forces_* functions do)
 //   potentialAt(x, y)         electric: the 2D potential phi; magnetic: A_z.
 //                             For magnetic models the field lines are contours of A_z.
+//   linesPerUnitCharge        electric only: field lines per unit charge (default LINES_PER_UNIT_CHARGE)
+//   levelOffset               electric only: the drawn levels of psi are (k + levelOffset) / linesPerUnitCharge
+//                             (default LEVEL_OFFSET). With 0, a +-q pair has a straight line running out to
+//                             infinity along its axis on either side; with 1/2 it does not.
 //   streamFunctionAt(x, y)    electric only: psi, normalised so that it increases by q on going once
 //                             around a charge q in the direction of increasing atan2(y - y_i, x - x_i).
-//                             Field lines are contours of psi; the levels are multiples of 1/LINES_PER_UNIT_CHARGE.
+//                             Field lines are contours of psi at the levels (k + levelOffset) / linesPerUnitCharge.
 //                             NB psi is multivalued: this returns the principal value, with each
 //                             charge's branch cut along the ray theta = +-pi (pointing in -x from the
 //                             charge). Callers tracing contours must unwrap.
@@ -41,7 +45,11 @@
 
 export const FIELD_SCALING_3D = 20000.0; // must match FIELD_SCALING in maxwell/src/lib.rs
 export const SOFTEN = 5.0;               // px^2; must match SOFTEN in maxwell/src/lib.rs
-export const LINES_PER_UNIT_CHARGE = 4;  // decision D4
+// Defaults for the electric field lines (see linesPerUnitCharge, levelOffset above; decision D4,
+// revised: originally 4 and 0). Configurable per embed (ui.js: state.linesPerUnitCharge,
+// state.fieldLineOffset).
+export const LINES_PER_UNIT_CHARGE = 5;
+export const LEVEL_OFFSET = 0.5;
 
 export const LINE_CHARGE_KIND = 'electrostatic_line_charge';
 export const WIRE_KIND = 'magnetostatic_wire';
@@ -72,7 +80,8 @@ function equivalentPotential(sources, K, ux, uy, width, height, x, y) {
  * @param {{charges: Array<{x:number,y:number,charge:number,isTestCharge?:boolean}>,
  *          uniformX?: number, uniformY?: number, width: number, height: number}} config
  */
-export function makeFieldModel(kind, { charges, uniformX = 0, uniformY = 0, width, height }) {
+export function makeFieldModel(kind, { charges, uniformX = 0, uniformY = 0, width, height,
+                                       linesPerUnitCharge = LINES_PER_UNIT_CHARGE, levelOffset = LEVEL_OFFSET }) {
     if (kind !== LINE_CHARGE_KIND && kind !== WIRE_KIND)
         throw new Error(`Unknown 2D field model ${kind}`);
     const isMagnetic = kind === WIRE_KIND;
@@ -87,6 +96,7 @@ export function makeFieldModel(kind, { charges, uniformX = 0, uniformY = 0, widt
 
     const model = {
         kind, isMagnetic, dimension: 2, sources, K, uniform: { x: ux, y: uy }, width, height,
+        ...(!isMagnetic && { linesPerUnitCharge, levelOffset }),
         fieldAt,
         fieldToBuffer(_f, x, y, buffer) {
             const { u, v } = fieldAt(x, y);

@@ -89,10 +89,30 @@ function arrowCandidates(points, closed, rect) {
             if (p[0] > right[0]) right = p;
         }
         const weight = pathLength(points);
-        return [{ p: left, weight }, { p: right, weight }];
+        return [{ p: left, weight, run: points, closed: true }, { p: right, weight, run: points, closed: true }];
     }
-    return runs.map(run => ({ p: arcLengthMidpoint(run), weight: pathLength(run) }));
+    return runs.map(run => ({ p: arcLengthMidpoint(run), weight: pathLength(run), run, closed: false }));
 }
+
+/** The point of a polyline closest to q, its distance, and its arc length from either end. */
+function closestOnPolyline(run, q, closed) {
+    let best = null, bestD = Infinity, s = 0, bestS = 0;
+    const n = closed ? run.length : run.length - 1;
+    for (let i = 0; i < n; i++) {
+        const a = run[i], b = run[(i + 1) % run.length];
+        const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy, l = Math.sqrt(l2);
+        const t = l2 > 0 ? Math.max(0, Math.min(1, ((q[0] - a[0]) * dx + (q[1] - a[1]) * dy) / l2)) : 0;
+        const x = a[0] + t * dx, y = a[1] + t * dy, d = Math.hypot(q[0] - x, q[1] - y);
+        if (d < bestD) { bestD = d; best = [x, y]; bestS = s + t * l; }
+        s += l;
+    }
+    return { p: best, d: bestD, fromStart: bestS, fromEnd: s - bestS };
+}
+
+// Arrows that stay where they were (see drawArrows), per canvas
+const previousArrows = new WeakMap();
+const ARROW_STICK_DISTANCE = 3;   // px: a line that moved less than this keeps its arrow in place
+const ARROW_STICK_END_MARGIN = 12; // px: ... unless the arrow would end up this close to an end of its stretch
 
 const MIN_ARROW_SEPARATION = 18; // px
 const MIN_ARROW_DISTANCE_FROM_SOURCE = 16; // px (the drawn charges have radius 10)
@@ -100,17 +120,30 @@ const MIN_ARROW_DISTANCE_FROM_SOURCE = 16; // px (the drawn charges have radius 
 /**
  * Draw arrows at the candidate positions, longest lines first, skipping any that would crowd an
  * arrow already placed or sit on top of a charge (e.g. on the many small loops around a wire).
+ *
+ * With `memoryKey` (the dynamic solver, whose lines evolve from frame to frame), an arrow stays where
+ * it was in the previous frame, moved onto its line, as long as the line has moved less than
+ * ARROW_STICK_DISTANCE: otherwise the midpoint of a line that is unchanged except near its far end
+ * (e.g. where it leaves the canvas) slides, and arrows on still lines would jitter.
  */
-function drawArrows(ctx, model, candidates, color) {
+function drawArrows(ctx, model, candidates, color, memoryKey = null) {
     candidates.sort((a, b) => b.weight - a.weight);
+    const previous = (memoryKey && previousArrows.get(memoryKey)) || [];
     const placed = [];
-    for (const { p } of candidates) {
+    for (const c of candidates) {
+        let p = c.p;
+        for (const q of previous) {
+            const near = closestOnPolyline(c.run, q, c.closed);
+            if (near.d < ARROW_STICK_DISTANCE && (c.closed ||
+                (near.fromStart > ARROW_STICK_END_MARGIN && near.fromEnd > ARROW_STICK_END_MARGIN))) { p = near.p; break; }
+        }
         if (model.sources.some(s => Math.hypot(p[0] - s.x, p[1] - s.y) < MIN_ARROW_DISTANCE_FROM_SOURCE)) continue;
         if (placed.some(q => Math.hypot(p[0] - q[0], p[1] - q[1]) < MIN_ARROW_SEPARATION)) continue;
         placed.push(p);
         const { u, v } = model.fieldAt(p[0], p[1]);
         drawDirectionArrow(p[0], p[1], u, v, ctx, color);
     }
+    if (memoryKey) previousArrows.set(memoryKey, placed);
 }
 
 function crossings(ctx, model, points, closed, gaussianSurfacePoints) {
@@ -129,12 +162,12 @@ export function drawElectricFieldLines2D(ctx, model, rect, gaussianSurfacePoints
         ctx.save();
         ctx.strokeStyle = color;
         ctx.lineWidth = 1.0;
-        strokePolyline(ctx, line.points);
+        strokePolyline(ctx, line.points, !!line.closed);
         ctx.restore();
-        candidates.push(...arrowCandidates(line.points, false, rect));
+        candidates.push(...arrowCandidates(line.points, !!line.closed, rect));
     }
-    drawArrows(ctx, model, candidates, color);
-    for (const line of lines) crossings(ctx, model, line.points, false, gaussianSurfacePoints);
+    drawArrows(ctx, model, candidates, color, model.stickyArrows ? ctx.canvas : null);
+    for (const line of lines) crossings(ctx, model, line.points, !!line.closed, gaussianSurfacePoints);
 }
 
 /** Magnetic field lines (contours of A_z) of a 2D straight-wire model. */

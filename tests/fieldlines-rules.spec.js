@@ -54,7 +54,7 @@ const electricGroups = [
 test.describe('electric field lines (2D line charges)', () => {
     for (const [group, configs] of electricGroups) {
         test.describe(group, () => {
-            test('each source has exactly 4|q| attached line ends', async ({ page }) => {
+            test('each source has exactly N|q| attached line ends (N lines per unit charge)', async ({ page }) => {
                 await expectRule(page, 'ruleExactCounts', [configs], 'Exact counts');
             });
             test('every end is on a source (within 1 px) or at infinity (> 3 view diagonals away); from/to agree', async ({ page }) => {
@@ -66,7 +66,7 @@ test.describe('electric field lines (2D line charges)', () => {
             test('lines do not depend on the view: view x2 gives the same lines inside the original view (1 px)', async ({ page }) => {
                 await expectRule(page, 'ruleViewportIndependence', [configs], 'Viewport independence');
             });
-            test("Gauss's law: net signed crossings of random polygons = 4 x enclosed charge", async ({ page }) => {
+            test("Gauss's law: net signed crossings of random polygons = N x enclosed charge", async ({ page }) => {
                 await expectRule(page, 'ruleGauss', [configs], "Gauss's law");
             });
             test('potential contours cross field lines at 90 +- 6 deg', async ({ page }) => {
@@ -88,7 +88,7 @@ test.describe('electric field lines (2D line charges)', () => {
         await expectRule(page, 'ruleRotationInvariance', [rotationConfigs()], 'Rotation invariance');
     });
 
-    test('a +2/-2 pair has a line along the axis; a +2/+2 pair has axis lines running outwards', async ({ page }) => {
+    test('straight lines along the axis of a pair exactly where a drawn level of psi lies (none for +-2 by default)', async ({ page }) => {
         await expectRule(page, 'ruleAxisLine', [axisConfigs()], 'Axis line');
     });
 });

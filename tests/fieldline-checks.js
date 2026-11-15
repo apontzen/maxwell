@@ -241,7 +241,8 @@ function signedArea2(polygon) {
 /**
  * Signed crossings of a polyline with a closed polygon. A crossing is +1 if the polyline leaves
  * the polygon (crosses outwards) and -1 if it enters. For a field line oriented from + to - the
- * sum over lines is the flux in units of 1/LINES_PER_UNIT_CHARGE, i.e. 4 x enclosed charge.
+ * sum over lines is the flux in units of the line spacing, i.e. N x enclosed charge for N lines per
+ * unit charge.
  * Every segment-edge intersection is counted (a segment may cross twice), so sparse polylines
  * are handled exactly. Returns {out, in, net}.
  */

@@ -21,7 +21,8 @@ export function contourStep(model) {
 export function electricFieldLines(model, view) {
     const s = requirePair(model);
     const iP = s[0].charge > 0 ? 0 : 1, iM = 1 - iP;
-    return exactDipoleLines(s[iP], s[iM], Math.abs(s[iP].charge), { from: iP, to: iM });
+    return exactDipoleLines(s[iP], s[iM], Math.abs(s[iP].charge),
+        { from: iP, to: iM, lpu: model.linesPerUnitCharge, levelOffset: model.levelOffset });
 }
 
 function circles(model, sign) {

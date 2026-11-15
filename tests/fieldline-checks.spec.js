@@ -404,11 +404,20 @@ test.describe('rule runners against the exact reference (neutral pairs only)', (
     });
     test('drag stability', () => expect(rules.ruleDragStability(env, dipoleDrags)).toEqual([]));
     test('rotation invariance', () => expect(rules.ruleRotationInvariance(env, dipoleRots)).toEqual([]));
-    test('axis line (unlike pair)', () => {
-        const ax = configs.axisConfigs();
-        const problems = rules.ruleAxisLine({ ...env, lines2d: reference }, { unlike: ax.unlike, like: { ...ax.unlike, name: 'skip' } });
-        // the "like" half of the rule cannot be satisfied by a dipole-only reference: only the unlike half is asserted
-        expect(problems.filter(p => p.startsWith('axis-unlike'))).toEqual([]);
+    test('axis lines (unlike pairs; default and original line settings)', () => {
+        // the like pairs cannot be drawn by a dipole-only reference
+        const unlike = Object.fromEntries(Object.entries(configs.axisConfigs()).filter(([k]) => k.startsWith('unlike')));
+        expect(Object.keys(unlike).length).toBe(6);
+        expect(rules.ruleAxisLine(env, unlike)).toEqual([]);
+    });
+    test('the axis rule catches a missing or an extra axis line', () => {
+        const { unlike, 'unlike-original': original } = configs.axisConfigs();
+        // the lines of the original settings for the default ones: extra axis lines
+        const extra = { ...reference, electricFieldLines: (m, v) => reference.electricFieldLines({ ...m, linesPerUnitCharge: 4, levelOffset: 0 }, v) };
+        expect(rules.ruleAxisLine({ ...env, lines2d: extra }, { unlike }).join('\n')).toMatch(/although psi = .* is not a drawn level/);
+        // and the other way round: missing ones
+        const missing = { ...reference, electricFieldLines: (m, v) => reference.electricFieldLines({ ...m, linesPerUnitCharge: 4, levelOffset: 0.5 }, v) };
+        expect(rules.ruleAxisLine({ ...env, lines2d: missing }, { original }).join('\n')).toMatch(/no line leaves source/);
     });
     test('contours perpendicular to field lines', () => expect(rules.rulePerpendicularContours(env, PAIR_CFGS)).toEqual([]));
     test("Gauss's law", () => expect(rules.ruleGauss(env, PAIR_CFGS)).toEqual([]));
@@ -422,7 +431,10 @@ test.describe('rule runners against the exact reference (neutral pairs only)', (
         expect(rules.ruleExactCounts({ models, lines2d: dropLine }, PAIR_CFGS).length).toBeGreaterThan(0);
         expect(rules.ruleGauss({ models, lines2d: dropLine }, PAIR_CFGS).length).toBeGreaterThan(0);
         const clipped = { ...base, electricFieldLines: (m, v) => base.electricFieldLines(m, v).map(l => ({ ...l, points: l.points.filter(([x, y]) => Math.abs(x - v.width / 2) < v.width && Math.abs(y - v.height / 2) < v.height) })) };
-        expect(rules.ruleEndpoints({ models, lines2d: clipped }, PAIR_CFGS).length).toBeGreaterThan(0);
+        // (with the original line settings: a pair then has rays to infinity along its axis)
+        const withRays = PAIR_CFGS.map(c => ({ ...c, linesPerUnitCharge: 4, levelOffset: 0 }));
+        expect(rules.ruleEndpoints({ models, lines2d: reference }, withRays)).toEqual([]);
+        expect(rules.ruleEndpoints({ models, lines2d: clipped }, withRays).length).toBeGreaterThan(0);
         const viewDependent = { ...base, electricFieldLines: (m, v) => base.electricFieldLines(m, v).map(l => ({ ...l, points: l.points.map(([x, y]) => [x + (v.width > 700 ? 3 : 0), y]) })) };
         expect(rules.ruleViewportIndependence({ models, lines2d: viewDependent }, PAIR_CFGS).length).toBeGreaterThan(0);
         const reversed = { ...base, electricFieldLines: (m, v) => base.electricFieldLines(m, v).map(l => ({ ...l, points: [...l.points].reverse(), from: l.to, to: l.from })) };

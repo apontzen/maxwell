@@ -5,13 +5,15 @@
 // For a +q charge at P and -q at M (field K q r / r^2 each):
 //   * the field lines are circular arcs through both charges. The line leaving P at angle
 //     alpha to the axis P->M is the circle through P and M whose tangent at P makes angle alpha
-//     (measured with the same handedness as atan2) with the axis. With 4|q| lines at
-//     alpha_k = 2 pi k / (4|q|) one line (k = 0) is the straight segment P->M and one (k = 2|q|, alpha =
-//     pi) is a straight ray from P to infinity, matched by a ray from infinity into M.
+//     (measured with the same handedness as atan2) with the axis. On it psi = q alpha / 2 pi - q / 2
+//     (mod q), so with N lines per unit charge at the levels (k + f) / N there are n = N|q| lines, at
+//     alpha_k = 2 pi (k + f + s) / n, s = 1/2 for odd n and 0 for even n. A line with alpha = 0 is
+//     the straight segment P->M; one with alpha = pi is a straight ray from P to infinity, matched by
+//     a ray from infinity into M. (By default N = 4, f = 0, the original choice, as these tests
+//     assume: alpha_k = 2 pi k / (4|q|), k = 0 the segment and k = 2|q| the rays.)
 //   * the equipotentials are the Apollonius circles |r - P| / |r - M| = lambda, exactly
 //     orthogonal to every field line.
 
-import { LINES_PER_UNIT_CHARGE } from '../fieldmodels.js';
 import { TAU, normAngle } from './fieldline-checks.js';
 
 const FAR = 1e5; // "infinity" for rays, in px
@@ -19,24 +21,25 @@ const FAR = 1e5; // "infinity" for rays, in px
 /**
  * @param {{x:number,y:number}} P  position of the positive charge
  * @param {{x:number,y:number}} M  position of the negative charge
- * @param {number} absq   |q|, so that there are 4|q| lines per charge
- * @param {{from?:number,to?:number,stepDeg?:number}} opts  indices of P and M in the source list
+ * @param {number} absq   |q|, so that there are N|q| lines per charge
+ * @param {{from?:number,to?:number,stepDeg?:number,lpu?:number,levelOffset?:number}} opts  indices of
+ *        P and M in the source list; N and f (see above)
  * @returns lines {points, from, to, level} oriented from P to M (or to/from infinity)
  */
-export function exactDipoleLines(P, M, absq, { from = 0, to = 1, stepDeg = 0.25 } = {}) {
-    const n = Math.round(LINES_PER_UNIT_CHARGE * absq);
+export function exactDipoleLines(P, M, absq, { from = 0, to = 1, stepDeg = 0.25, lpu = 4, levelOffset = 0 } = {}) {
+    const n = Math.round(lpu * absq);
     const D = Math.hypot(M.x - P.x, M.y - P.y);
     const ux = (M.x - P.x) / D, uy = (M.y - P.y) / D;
     const nx = -uy, ny = ux;
     const lines = [];
     for (let k = 0; k < n; k++) {
-        const alpha = (TAU * k) / n;
-        const level = k / LINES_PER_UNIT_CHARGE;
+        const alpha = lineAngle(n, k, levelOffset);
+        const level = (k + levelOffset) / lpu;
         const tx = Math.cos(alpha) * ux + Math.sin(alpha) * nx;
         const ty = Math.cos(alpha) * uy + Math.sin(alpha) * ny;
-        if (k === 0) {
+        if (isAngle(alpha, 0)) {
             lines.push({ points: [[P.x, P.y], [M.x, M.y]], from, to, level });
-        } else if (2 * k === n) {
+        } else if (isAngle(alpha, Math.PI)) {
             // along the axis, away from the other charge: to infinity from P, and from infinity into M
             lines.push({ points: [[P.x, P.y], [P.x + tx * FAR, P.y + ty * FAR]], from, to: 'infinity', level });
             lines.push({ points: [[M.x - tx * FAR, M.y - ty * FAR], [M.x, M.y]], from: 'infinity', to, level });
@@ -63,16 +66,22 @@ export function exactDipoleLines(P, M, absq, { from = 0, to = 1, stepDeg = 0.25 
     return lines;
 }
 
+/** alpha_k (see above) for n lines, in [0, 2 pi) */
+function lineAngle(n, k, levelOffset) {
+    return (TAU * (k + levelOffset + (n % 2) / 2)) / n;
+}
+const isAngle = (a, b) => { const d = normAngle(a - b); return Math.min(d, TAU - d) < 1e-9; };
+
 /**
  * Analytic attachment angle (chord angle at distance d, as defined by attachmentAngle) of the
  * exact dipole line with index k at the positive charge P.
  */
-export function exactAttachmentAngleAtPlus(P, M, absq, k, d = 15) {
-    const n = Math.round(LINES_PER_UNIT_CHARGE * absq);
+export function exactAttachmentAngleAtPlus(P, M, absq, k, d = 15, { lpu = 4, levelOffset = 0 } = {}) {
+    const n = Math.round(lpu * absq);
     const D = Math.hypot(M.x - P.x, M.y - P.y);
     const axis = Math.atan2(M.y - P.y, M.x - P.x);
-    const alpha = (TAU * k) / n;
-    if (k === 0 || 2 * k === n) return normAngle(axis + alpha); // straight
+    const alpha = lineAngle(n, k, levelOffset);
+    if (isAngle(alpha, 0) || isAngle(alpha, Math.PI)) return normAngle(axis + alpha); // straight
     const rho = Math.abs(D / (2 * Math.sin(alpha)));
     const s = curvatureSign(P, M, alpha);
     const theta = 2 * Math.asin(Math.min(1, d / (2 * rho))); // arc angle subtended by the chord

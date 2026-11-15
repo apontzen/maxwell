@@ -11,6 +11,7 @@
 //   - behaviour at phone width and on window resize;
 //   - that clicks, double clicks and touch drags behave as expected.
 
+import { pairDipoles } from '../dipoles.js';
 import {
     test, expect, examples, expectedCheckboxes, isDynamic, isMagneticSolver, hasGaussianSurface, dipolePairs,
     grabbableCharges, sampleCharges, dragTarget, gotoExample, waitForRender, embed, canvas,
@@ -91,7 +92,12 @@ for (const example of examples) {
                 await advance(page);
                 if (cb.checked) await expect(checkbox(page, cb.key)).toBeChecked();
                 else await expect(checkbox(page, cb.key)).not.toBeChecked();
-                if (!isDynamic(example))
+                // ticking the dipole tickbox pairs up free charges into dipoles (dipoles.js): then the
+                // rendering after toggling twice has those new dipoles
+                const newDipoles = cb.key === 'dipole' && pairDipoles(structuredClone(example.state.charges)) > 0;
+                if (newDipoles)
+                    expect(await canvasPng(page)).toMatchSnapshot(snap(`toggle-${cb.key}-twice`));
+                else if (!isDynamic(example))
                     expect(countDifferentPixels(before, await canvasPixels(page)),
                         'toggling twice should restore the original rendering').toBe(0);
             });

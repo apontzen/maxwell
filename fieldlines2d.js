@@ -19,14 +19,21 @@
 //     level: number,           // the value of the stream function psi on this line (mod q)
 // }>
 //   - model.kind === 'electrostatic_line_charge'.
-//   - Lines are contours of model.streamFunctionAt at levels k / LINES_PER_UNIT_CHARGE (D4).
-//     With the offset C = 0 (D5) the levels are exactly the multiples of 1/LINES_PER_UNIT_CHARGE.
-//   - Every source of charge q has exactly LINES_PER_UNIT_CHARGE * |q| line ends attached, for q
-//     a multiple of 1/LINES_PER_UNIT_CHARGE. (Lines from a charge back to the same charge are
-//     impossible for a static field.)
+//   - Lines are contours of model.streamFunctionAt at the levels (k + f) / N, k integer, with
+//     N = model.linesPerUnitCharge and f = model.levelOffset (defaults LINES_PER_UNIT_CHARGE and
+//     LEVEL_OFFSET in fieldmodels.js; decisions D4, D5 as revised: originally N = 4, f = 0).
+//   - Every source of charge q has exactly N|q| line ends attached, for q a multiple of 1/N
+//     (otherwise the nearest whole number below or above, with a console warning). (Lines from a
+//     charge back to the same charge are impossible for a static field.)
 //   - Includes lines from/to infinity, including those of the uniform field (model.uniform),
 //     which may not touch any charge. Each physical line appears exactly once.
 //   - A line ending on a charge ends exactly at the charge's position.
+//
+//   Grid models (gridfield.js, model.kind === 'electrostatic_grid'; issue #3 stage 2b): the same,
+//   except that the world ends at the edge of the canvas (model.region), so `infinity` means a
+//   point on that edge, or a point where the line fades out in a region with no field (a "dead
+//   zone", e.g. where radiation has not arrived and the static fields cancel). A time-dependent
+//   field can also have closed field lines, returned with from = to = 'loop' and closed = true.
 //
 // magneticFieldLines(model, view) -> Array<{ points: Array<[x, y]>, closed: boolean, level: number }>
 //   - model.kind === 'magnetostatic_wire'. Contours of model.potentialAt (= A_z) at levels
@@ -52,7 +59,7 @@
 // "infinity" at 10 view diagonals. Stagnation points are found exactly (polynomial roots); a
 // line/contour that runs exactly into one (by symmetry) is continued along the next branch, so
 // each branch of the crossing is drawn once.
-//   Electric: each source is seeded at the LPU*|q| exact crossings of psi = k/LPU on a small
+//   Electric: each source is seeded at the N|q| exact crossings of the levels of psi on a small
 //   circle around it. Lines from positive sources are traced along E and claim the slot of the
 //   negative source they reach; the unclaimed slots of negative sources are traced backwards to
 //   infinity. With a uniform field, lines touching no source are seeded where psi crosses a level
@@ -63,17 +70,21 @@
 //   traced through the disks around sources but the parts inside are dropped.
 //   Coincident sources are traced as one source of their total charge (with zero-length lines
 //   between the members' remaining line ends).
+//   Grid models: psi has a single-valued part interpolated from the grid; stagnation points are
+//   found on the grid; lines are also seeded on the edge of the world (lines that touch no charge)
+//   and along a ray from each extremum of psi to the edge (closed lines: each encloses one; see
+//   closedLoops for extrema too ill-conditioned to find). Saddles within GRID_SNAP_TOLERANCE of a
+//   level are snapped onto. Lines' levels are compared modulo the charges (psi is multivalued).
 
 
 import { LINES_PER_UNIT_CHARGE } from './fieldmodels.js';
 import {
-    buildSystem, PsiEvaluator, PotentialEvaluator, stagnationPoints, softenStagnationPoints,
-    prepareSnap, traceContour, sampleStep, bracketRoot, seedBox, boxPoint, SegmentHash,
+    buildSystem, PsiEvaluator, PotentialEvaluator, stagnationPoints, softenStagnationPoints, gridStagnationPoints, inDeadZone,
+    prepareSnap, lazySnap, traceContour, sampleStep, bracketRoot, seedBox, boxPoint, SegmentHash,
 } from './levelsets2d.js';
 
 export { LINES_PER_UNIT_CHARGE };
 
-const LPU = LINES_PER_UNIT_CHARGE;
 const TWO_PI = 2 * Math.PI;
 
 // Contour spacing in units of model.K (see contourStep). pi/4 gives lecture 4's equipotentials
@@ -120,13 +131,12 @@ function dominanceRadius(T, i) {
 }
 
 /**
- * The LPU*|q| points where the field lines of source i cross a small circle around it, with the
+ * The N|q| points where the field lines of source i cross a small circle around it, with the
  * psi frame (unwrapped angles) at each.
  */
 function chargeSlots(T, ev, i) {
-    const q = T.qs[i];
-    const nl = Math.round(LPU * Math.abs(q));
-    if (nl === 0) return null;
+    const q = T.qs[i], N = T.lpu;
+    if (q === 0) return null;
     const rho = dominanceRadius(T, i);
     const xi = T.xs[i], yi = T.ys[i];
     const thc = new Float64Array(T.n);
@@ -140,22 +150,24 @@ function chargeSlots(T, ev, i) {
             th[j] = j === i ? alpha : thc[j] + wrap(Math.atan2(y - T.ys[j], x - T.xs[j]) - thc[j]);
             s += T.qs[j] * th[j];
         }
-        return { x, y, th, psi: s / TWO_PI + (T.ux * (y - T.myc) - T.uy * (x - T.mxc)) * c };
+        return { x, y, th, psi: s / TWO_PI + (T.ux * (y - T.myc) - T.uy * (x - T.mxc)) * c + ev.restAt(x, y) + T.psiShift };
     };
     const a = state(-Math.PI).psi;
     const sgn = q > 0 ? 1 : -1;
-    const k0 = q > 0 ? Math.ceil(LPU * a - 1e-9) : Math.floor(LPU * a + 1e-9);
+    // the levels crossed going once round: N|q| of them (if that is a whole number; otherwise the
+    // nearest whole number below or above, depending on where the levels fall)
+    const first = (v) => q > 0 ? Math.ceil(N * v - 1e-9) : Math.floor(N * v + 1e-9);
+    const k0 = first(a), nl = Math.abs(first(a + q) - k0);
+    if (nl === 0) return null;
     const list = [];
     for (let m = 0; m < nl; m++) {
-        const level = (k0 + sgn * m) / LPU;
+        const level = (k0 + sgn * m) / N;
         // psi is monotonic in alpha (increasing for q > 0) on [-pi - 0.1, pi + 0.1]
-        let lo = -Math.PI - 0.1, hi = Math.PI + 0.1;
-        for (let it = 0; it < 60; it++) {
-            const mid = 0.5 * (lo + hi);
-            if ((state(mid).psi - level) * sgn < 0) lo = mid; else hi = mid;
-        }
-        const st = state(0.5 * (lo + hi));
-        list.push({ angle: wrap(0.5 * (lo + hi)), x: st.x, y: st.y, th: st.th, level, line: -1 });
+        const lo = -Math.PI - 0.1, hi = Math.PI + 0.1;
+        const f = (t) => state(t).psi - level;
+        const alpha = bracketRoot(f, lo, hi, f(lo), f(hi));
+        const st = state(alpha);
+        list.push({ angle: wrap(alpha), x: st.x, y: st.y, th: st.th, level, line: -1 });
     }
     return { rho, list };
 }
@@ -192,14 +204,15 @@ export function electricFieldLines(model, view) {
     const reduced = { ...model, sources: keep.map(k => merged[k]) };
     const lines = electricLines(reduced, view);
     // remaining capacity of each original source
-    const cap = src.map(c => Math.round(LPU * Math.abs(c.charge)));
+    const N = model.linesPerUnitCharge ?? LINES_PER_UNIT_CHARGE;
+    const cap = src.map(c => Math.round(N * Math.abs(c.charge)));
     const take = (g, sign) => {
         for (const i of groups[g]) if (cap[i] > 0 && Math.sign(src[i].charge) === sign) { cap[i]--; return i; }
         return -1;
     };
     for (const l of lines) {
-        if (l.from !== 'infinity') l.from = take(keep[l.from], 1);
-        if (l.to !== 'infinity') l.to = take(keep[l.to], -1);
+        if (typeof l.from === 'number') l.from = take(keep[l.from], 1);
+        if (typeof l.to === 'number') l.to = take(keep[l.to], -1);
     }
     for (let g = 0; g < groups.length; g++) {
         for (;;) {
@@ -213,20 +226,44 @@ export function electricFieldLines(model, view) {
     return lines;
 }
 
+const MIN_EDGE_LINE = 4; // px
+const GRID_SNAP_TOLERANCE = 0.03;   // in line spacings
+
+function pathLength(pts) {
+    let s = 0;
+    for (let k = 1; k < pts.length; k++) s += Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]);
+    return s;
+}
+
+// A line of a grid model may also fade out in a dead zone (no field); it is drawn as 'infinity'
+const openEnd = (end) => end === 'infinity' || end === 'faded';
+
 function electricLines(model, view) {
     const T = buildSystem(model, view);
     const diag = { conflicts: 0, maxsteps: 0, freeHitCharge: 0, seeds: 0 };
     Object.keys(diagnostics).forEach(k => delete diagnostics[k]);
     Object.assign(diagnostics, diag);
-    if (T.n === 0 && !T.hasUniform) return [];
-    T.crit = stagnationPoints(T);
+    if (T.n === 0 && !T.hasUniform && !T.region) return [];
+    warnFractionalLines(T);
     const ev = new PsiEvaluator(T);
+    T.crit = T.rest ? gridStagnationPoints(T, ev) : stagnationPoints(T);
+    const tag = levelTagger(T);
+    // Stagnation points lying on a traced level are snapped onto (see traceContour), so that which
+    // way a contour goes there doesn't depend on rounding. For grid models a saddle within
+    // GRID_SNAP_TOLERANCE of a level counts: otherwise, e.g. in a symmetric configuration where the
+    // saddles lie exactly on a level, noise decides frame by frame whether a radiation loop has
+    // detached, and loops flicker.
     const snaps = [];
+    const tolerance = T.region ? GRID_SNAP_TOLERANCE : 1e-8;
     for (const s of T.crit) {
-        const v = LPU * ev.principal(s.x, s.y);
-        if (Math.abs(v - Math.round(v)) < 1e-8) {
-            const p = prepareSnap(T, ev, s, 1 / LPU);
-            if (p) snaps.push(p);
+        if (s.extremum) continue;
+        const v = T.lpu * ev.principal(s.x, s.y);
+        const off = Math.abs(v - Math.round(v));
+        if (off < tolerance) {
+            const level = Math.round(v) / T.lpu;
+            if (T.region) { snaps.push(lazySnap(T, s, level, 1 / T.lpu, off / T.lpu)); continue; }
+            const p = prepareSnap(T, ev, s, 1 / T.lpu);
+            if (p) { p.level = level; snaps.push(p); }
         }
     }
     T.snaps = snaps;
@@ -275,7 +312,7 @@ function electricLines(model, view) {
             slot.line = index;
             let to = 'infinity';
             if (res.end === 'capture') { arrive(pts, res.source, index); to = res.source; }
-            else if (res.end !== 'infinity') diag.maxsteps++;
+            else if (!openEnd(res.end)) diag.maxsteps++;
             lines.push({ points: pts, from: i, to, level: slot.level });
         }
     }
@@ -291,7 +328,7 @@ function electricLines(model, view) {
             slot.line = index;
             let from = 'infinity';
             if (res.end === 'capture') { arrive(pts, res.source, index); from = res.source; diag.conflicts++; }
-            else if (res.end !== 'infinity') diag.maxsteps++;
+            else if (!openEnd(res.end)) diag.maxsteps++;
             pts.reverse();
             lines.push({ points: pts, from, to: i, level: slot.level });
         }
@@ -299,35 +336,101 @@ function electricLines(model, view) {
 
     // lines of the uniform field that touch no charge: every one crossing the view crosses the
     // boundary of the (expanded) view, so seed on that boundary
-    if (T.hasUniform) {
-        const box = seedBox(T, SEED_MARGIN);
+    if (T.hasUniform || T.region) {
+        const box = T.region ? regionSeedBox(T) : seedBox(T, SEED_MARGIN);
         const hash = new SegmentHash(box);
-        for (const l of lines) hash.insertPolyline(l.points, 0);
+        // Tagged with their level: a seed is only on a traced line of its own level (a line of another
+        // level can pass within the hash's tolerance, e.g. where lines are dense near the charges).
+        // psi is multivalued, so levels are compared modulo the charges.
+        for (const l of lines) hash.insertPolyline(l.points, tag(l.level));
         const seeds = psiBoxSeeds(T, ev, box);
         diag.seeds = seeds.length;
+        // grid models: lines already traced end exactly where they cross the edge of the world
+        const ends = [];
+        if (T.region) for (const l of lines) {
+            if (l.from === 'infinity') ends.push(l.points[0]);
+            if (l.to === 'infinity') ends.push(l.points[l.points.length - 1]);
+        }
         for (const sd of seeds) {
-            if (hash.contains(sd.x, sd.y)) continue;
+            if (inDeadZone(T, sd.x, sd.y)) continue;
+            if (ends.some(([ex, ey]) => Math.abs(ex - sd.x) + Math.abs(ey - sd.y) < 1e-4)) continue;
+            if (hash.contains(sd.x, sd.y, tag(sd.level))) continue;
             ev.copyStateFrom(sd.th);
             const f = traceContour(T, ev, sd.x, sd.y, sd.level, 1, { capture: captureNeg, snaps });
             if (f.end === 'capture') { diag.freeHitCharge++; continue; }
             ev.copyStateFrom(sd.th);
             const b = traceContour(T, ev, sd.x, sd.y, sd.level, -1, { capture: capturePos, snaps });
             if (b.end === 'capture') { diag.freeHitCharge++; continue; }
-            if (f.end !== 'infinity' || b.end !== 'infinity') diag.maxsteps++;
+            if (!openEnd(f.end) || !openEnd(b.end)) diag.maxsteps++;
             const pts = b.pts.reverse().concat(f.pts.slice(1));
-            hash.insertPolyline(pts, 0);
+            hash.insertPolyline(pts, tag(sd.level));
+            // grid models: a stub where a contour of a (nearly) dead zone grazes the edge
+            if (T.region && pathLength(pts) < MIN_EDGE_LINE) continue;
             lines.push({ points: pts, from: 'infinity', to: 'infinity', level: sd.level });
         }
+        if (T.region) closedLoops(T, ev, hash, tag, captureNeg, capturePos, snaps, lines);
     }
     Object.assign(diagnostics, diag, { stagnation: T.crit.length, snaps: snaps.length });
+    // the levels traced are those of psi + T.psiShift
+    for (const l of lines) l.level -= T.psiShift;
     return lines;
 }
 
-/** Points on the box boundary where psi (unwrapped along the boundary) crosses a level k / LPU. */
+const warned = new Set();
+/** Warn (once per value) about charges that don't have a whole number of field lines. */
+function warnFractionalLines(T) {
+    for (let i = 0; i < T.n; i++) {
+        const n = T.lpu * Math.abs(T.qs[i]);
+        if (Math.abs(n - Math.round(n)) < 1e-6 || warned.has(n)) continue;
+        warned.add(n);
+        console.warn(`MEME: a charge of ${T.qs[i]} at ${T.lpu} field lines per unit charge would have ${n} lines; `
+            + `drawing ${Math.floor(n)} or ${Math.ceil(n)} (set linesPerUnitCharge so that every charge has a whole number)`);
+    }
+}
+
+/**
+ * A label for the contour of psi at `level` (a multiple of 1/N): psi changes by q around a source
+ * of charge q, so levels differing by an integer combination of the charges label the same
+ * contours. In units of the line spacing those combinations are the multiples of G (0: none).
+ */
+function levelTagger(T) {
+    const N = T.lpu;
+    const gcd = (a, b) => b ? gcd(b, a % b) : a;
+    // N q_i = a_i / d with integers a_i (d small): the combinations are multiples of gcd(a) / d,
+    // of which the integers are the multiples of gcd(a) / gcd(gcd(a), d)
+    let G = 0;
+    for (let d = 1; d <= 12; d++) {
+        const a = Array.from(T.qs, q => d * N * Math.abs(q));
+        if (!a.every(v => Math.abs(v - Math.round(v)) < 1e-6)) continue;
+        const g = a.reduce((g, v) => gcd(g, Math.round(v)), 0);
+        G = g ? g / gcd(g, d) : 0;
+        break;
+    }
+    T.levelPeriod = G / N;   // for traceContour's snaps
+    return G ? (level => { const m = Math.round(N * level) % G; return m < 0 ? m + G : m; })
+             : (level => Math.round(N * level));
+}
+
+/** Grid models: the edge of the world, moved just inside it. */
+function regionSeedBox(T) {
+    const r = T.region;
+    return { x0: r.x0, y0: r.y0, x1: r.x1, y1: r.y1 };
+}
+
+/** Points on the box boundary where psi (unwrapped along the boundary) crosses a level k / T.lpu. */
 function psiBoxSeeds(T, ev, box) {
     const P = 2 * ((box.x1 - box.x0) + (box.y1 - box.y0));
+    return psiPathSeeds(T, ev, s => boxPoint(box, s), P);
+}
+
+/**
+ * Points on the path pointAt(s), 0 <= s <= P, where psi (unwrapped along it) crosses a level k / T.lpu,
+ * in order along the path. If `stop` is given, it is called with each, and a true result ends the
+ * search. `origin`: the stagnation point the path starts from, if any (see sampleStep).
+ */
+function psiPathSeeds(T, ev, pointAt, P, stop, origin) {
     let s = 0;
-    let [x, y] = boxPoint(box, 0);
+    let [x, y] = pointAt(0);
     ev.resetPrincipal(x, y);
     let v = ev.val(x, y);
     const seeds = [];
@@ -335,23 +438,75 @@ function psiBoxSeeds(T, ev, box) {
         const thPrev = ev.saveState();
         const xp = x, yp = y, vp = v;
         const sp = s;
-        s = Math.min(P, s + sampleStep(T, x, y, Math.hypot(ev.gx, ev.gy), 1 / LPU));
-        [x, y] = boxPoint(box, s);
+        s = Math.min(P, s + sampleStep(T, x, y, Math.hypot(ev.gx, ev.gy), 1 / T.lpu, origin));
+        [x, y] = pointAt(s);
         v = ev.val(x, y);
-        let ka = Math.floor(LPU * vp), kb = Math.floor(LPU * v);
+        let ka = Math.floor(T.lpu * vp), kb = Math.floor(T.lpu * v);
         if (ka === kb) continue;
         const lo = Math.min(ka, kb) + 1, hi = Math.max(ka, kb);
         for (let m = lo; m <= hi; m++) {
-            const level = m / LPU;
-            const f = (t) => { const [qx, qy] = boxPoint(box, t); return vp + ev.diff(qx, qy, xp, yp) - level; };
-            const [qx, qy] = boxPoint(box, bracketRoot(f, sp, s, vp - level, v - level));
+            const level = m / T.lpu;
+            const f = (t) => { const [qx, qy] = pointAt(t); return vp + ev.diff(qx, qy, xp, yp) - level; };
+            const [qx, qy] = pointAt(bracketRoot(f, sp, s, vp - level, v - level));
             const th = new Float64Array(T.n);
             for (let j = 0; j < T.n; j++)
                 th[j] = thPrev[j] + wrap(Math.atan2(qy - T.ys[j], qx - T.xs[j]) - Math.atan2(yp - T.ys[j], xp - T.xs[j]));
-            seeds.push({ x: qx, y: qy, th, level });
+            const seed = { x: qx, y: qy, th, level };
+            seeds.push(seed);
+            if (stop && stop(seed)) return seeds;
         }
     }
     return seeds;
+}
+
+const INNERMOST_RAY_CELLS = 12;
+
+/**
+ * Grid models: closed field lines (e.g. radiation). Each encloses an extremum of psi, so seed along
+ * a ray from every extremum to the edge of the world. An extremum on a long flat ridge (a long thin
+ * loop) can be too ill-conditioned to pin down; then a saddle beside it on the ridge, or a corner
+ * of the grid that is a discrete extremum (T.loopCentres, see gridStagnationPoints), lies inside
+ * the same loops.
+ * Rays from those only look for loops round that point: they end at the first crossing that is not
+ * a new loop, or after INNERMOST_RAY_CELLS cells (they are many, mostly in weak noisy fields, and
+ * their full rays would cost as much as all the rest).
+ */
+function closedLoops(T, ev, hash, tag, capture, captureBack, snaps, lines) {
+    const reg = T.region;
+    const tracer = new PsiEvaluator(T);
+    const origins = T.crit.filter(c => c.extremum).concat(T.crit.filter(c => !c.extremum), T.loopCentres);
+    for (const c of origins) {
+        if (inDeadZone(T, c.x, c.y)) continue;
+        const innermost = !c.extremum;
+        // the ray towards the nearest edge
+        const d = [[c.x - reg.x0, -1, 0], [reg.x1 - c.x, 1, 0], [c.y - reg.y0, 0, -1], [reg.y1 - c.y, 0, 1]]
+            .sort((p, q) => p[0] - q[0])[0];
+        let L = d[0] * (1 - 1e-9);
+        if (innermost) L = Math.min(L, INNERMOST_RAY_CELLS * Math.max(T.rest.dx, T.rest.dy));
+        const r0 = 1e-3;
+        psiPathSeeds(T, ev, s => [c.x + d[1] * (r0 + s), c.y + d[2] * (r0 + s)], L - r0, sd => {
+            if (inDeadZone(T, sd.x, sd.y) || hash.contains(sd.x, sd.y, tag(sd.level))) return innermost;
+            tracer.copyStateFrom(sd.th);
+            const f = traceContour(T, tracer, sd.x, sd.y, sd.level, 1, { capture, snaps, closeGate: true });
+            if (f.end === 'closed') {
+                hash.insertPolyline(f.pts, tag(sd.level));
+                lines.push({ points: f.pts, from: 'loop', to: 'loop', level: sd.level, closed: true });
+                return false;
+            }
+            // Not closed: an open line. One reaching a charge has been traced from the charge, and
+            // one crossing the edge at both ends from the edge; one that fades out in a dead zone
+            // has not: draw it from here. Traces not drawn must not claim seeds (they can disagree
+            // with the drawn line where they pass a saddle, and a loop's seed would then be lost).
+            if (f.end !== 'faded' && f.end !== 'infinity') return innermost;
+            tracer.copyStateFrom(sd.th);
+            const b = traceContour(T, tracer, sd.x, sd.y, sd.level, -1, { capture: captureBack, snaps });
+            if (!openEnd(b.end)) return innermost;
+            const pts = b.pts.reverse().concat(f.pts.slice(1));
+            hash.insertPolyline(pts, tag(sd.level));
+            if (pathLength(pts) >= MIN_EDGE_LINE) lines.push({ points: pts, from: 'infinity', to: 'infinity', level: sd.level });
+            return innermost;
+        }, c);
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
